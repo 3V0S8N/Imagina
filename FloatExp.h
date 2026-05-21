@@ -1,9 +1,17 @@
 #pragma once
 #include <stdint.h>
+#ifdef _WIN32
 #include <intrin.h>
+#else
+#include <x86intrin.h>
+#endif
 #include <type_traits>
 #include <bit>
+#ifdef IMAGINA_LINUX
+#include <gmpxx.h>
+#else
 #include <mpirxx.h>
+#endif
 #include <complex>
 
 struct FExpDouble;

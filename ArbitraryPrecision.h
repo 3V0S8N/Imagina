@@ -1,8 +1,13 @@
 #ifndef _ARBITRARY_PRECISION_H_
 #define _ARBITRARY_PRECISION_H_
 
+#ifdef IMAGINA_LINUX
+#include <gmp.h>
+#include <gmpxx.h>
+#else
 #include <mpir.h>
 #include <mpirxx.h>
+#endif
 
 #ifdef _WIN32
 #include <intrin.h>

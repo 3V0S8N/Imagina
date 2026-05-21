@@ -1,11 +1,48 @@
 #ifndef _TYPES_H_
 #define _TYPES_H_
 
+#ifdef IMAGINA_LINUX
+#include <gmpxx.h>
+#include <sys/mman.h>
+#include <cstring>
+#else
 #include <mpirxx.h>
+#endif
 #include "FloatExp.h"
 #include "ArbitraryPrecision.h"
 #include "Vector4.h"
 #include "FloatExpVector4.h"
+
+#ifdef IMAGINA_LINUX
+inline void *ImaginaReserveVirtual(size_t size) {
+	void *p = mmap(nullptr, size, PROT_READ | PROT_WRITE,
+		MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+	return (p == MAP_FAILED) ? nullptr : p;
+}
+inline void ImaginaCommitVirtual(void *addr, size_t size) {
+	(void)addr; (void)size;
+}
+inline void ImaginaDecommitVirtual(void *addr, size_t size) {
+	madvise(addr, size, MADV_DONTNEED);
+}
+inline void ImaginaReleaseVirtual(void *addr, size_t size) {
+	munmap(addr, size);
+}
+#else
+inline void *ImaginaReserveVirtual(size_t size) {
+	return VirtualAlloc(nullptr, size, MEM_RESERVE, PAGE_READWRITE);
+}
+inline void ImaginaCommitVirtual(void *addr, size_t size) {
+	VirtualAlloc(addr, size, MEM_COMMIT, PAGE_READWRITE);
+}
+inline void ImaginaDecommitVirtual(void *addr, size_t size) {
+	VirtualFree(addr, size, MEM_DECOMMIT);
+}
+inline void ImaginaReleaseVirtual(void *addr, size_t size) {
+	(void)size;
+	VirtualFree(addr, 0, MEM_RELEASE);
+}
+#endif
 
 template <size_t n, typename T> struct VectorSelector { using type = void; };
 template <typename T> struct VectorSelector<1, T> { using type = T; };
@@ -114,7 +151,7 @@ class ReservedMemoryArray {
 
 	void Commit() {
 		if (CommittedSize + CommitSize > ReservedSize) throw "";
-		VirtualAlloc(((uint8_t *)Data) + CommittedSize, CommitSize, MEM_COMMIT, PAGE_READWRITE);
+		ImaginaCommitVirtual(((uint8_t *)Data) + CommittedSize, CommitSize);
 		CommittedSize += CommitSize;
 		Capacity = CommittedSize / sizeof(T);
 	}
@@ -122,7 +159,7 @@ class ReservedMemoryArray {
 public:
 
 	ReservedMemoryArray() {}
-	ReservedMemoryArray(size_t ReserveSize) : ReservedSize(ReserveSize), MaxCapacity(ReserveSize / sizeof(T)), Data((T *)VirtualAlloc(nullptr, ReserveSize, MEM_RESERVE, PAGE_READWRITE)) {}
+	ReservedMemoryArray(size_t ReserveSize) : ReservedSize(ReserveSize), MaxCapacity(ReserveSize / sizeof(T)), Data((T *)ImaginaReserveVirtual(ReserveSize)) {}
 	ReservedMemoryArray(const ReservedMemoryArray &a) = delete;
 	ReservedMemoryArray(ReservedMemoryArray &&a) : ReservedSize(a.ReservedSize), CommittedSize(a.CommittedSize), MaxCapacity(a.MaxCapacity), Capacity(a.Capacity), Size(a.Size), Data(a.Data) {
 		a.Data = nullptr;
@@ -134,7 +171,7 @@ public:
 					Data[i].~T();
 				}
 			}
-			VirtualFree(Data, 0, MEM_RELEASE);
+			ImaginaReleaseVirtual(Data, ReservedSize);
 		}
 	}
 
@@ -160,7 +197,7 @@ public:
 		if (NewSize > Capacity) {
 			size_t NewCommittedSize = (NewSize * sizeof(T) + CommitSize - 1) & ~(CommitSize - 1); // i * sizeof(complex) round up to nearest multiple of CommitSize
 			if (NewCommittedSize > ReservedSize) throw "";
-			VirtualAlloc(((uint8_t *)Data) + CommittedSize, NewCommittedSize - CommittedSize, MEM_COMMIT, PAGE_READWRITE);
+			ImaginaCommitVirtual(((uint8_t *)Data) + CommittedSize, NewCommittedSize - CommittedSize);
 			CommittedSize = NewCommittedSize;
 			Capacity = CommittedSize / sizeof(T);
 		}
@@ -209,18 +246,18 @@ public:
 			Commit();
 			size_t CopySize = std::min(CommitSize, ASize - Offset);
 			memcpy(data + size, AData + Offset, CopySize);
-			VirtualFree(((uint8_t *)AData) + (Offset & ~(CommitSize - 1)), CommitSize, MEM_DECOMMIT);
+			ImaginaDecommitVirtual(((uint8_t *)AData) + (Offset & ~(CommitSize - 1)), CommitSize);
 			size += CopySize;
 			Offset += CopySize;
 		}
 		Size += a.Size;
-		VirtualFree(AData, 0, MEM_RELEASE);
+		ImaginaReleaseVirtual(AData, a.ReservedSize);
 		a = ReservedMemoryArray();
 	}
 	void ShrinkToFit() {
 		if (Size + CommitSize / sizeof(T) * 2 < Capacity) {
 			size_t NewCommittedSize = (Size * sizeof(T) + CommitSize - 1) & ~(CommitSize - 1); // i * sizeof(complex) round up to nearest multiple of CommitSize
-			VirtualFree(((uint8_t *)Data) + NewCommittedSize, CommittedSize - NewCommittedSize, MEM_DECOMMIT);
+			ImaginaDecommitVirtual(((uint8_t *)Data) + NewCommittedSize, CommittedSize - NewCommittedSize);
 			CommittedSize = NewCommittedSize;
 			Capacity = CommittedSize / sizeof(T);
 		}

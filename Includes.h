@@ -27,6 +27,10 @@
 #ifdef _WIN32
 #include <glext.h>
 #include <wglext.h>
+#else
+#if __has_include(<GL/glext.h>)
+#include <GL/glext.h>
+#endif
 #endif
 
 #ifdef GL_TEXTURE_RECTANGLE
@@ -56,11 +60,13 @@
 #include "Evaluator.h"
 #include "HInfLAEvaluator.h"
 #include "JitEvaluator.h"
+#ifndef IMAGINA_LINUX
 #include "MainWindow.h"
+#endif
 #include "Render.h"
 
 inline uint32_t CountLeadingZeros(uint32_t n) {
-#if __has_builtin(__builtin_subcll)
+#if defined(__GNUC__) || defined(__clang__)
 	return __builtin_clz(n);
 #elif defined(_WIN32)
 	return _lzcnt_u32(n);

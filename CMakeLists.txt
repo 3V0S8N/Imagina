@@ -1,13 +1,25 @@
-﻿cmake_minimum_required (VERSION 3.8)
+cmake_minimum_required (VERSION 3.16)
 
 project ("Imagina")
 
 option(ENABLE_CUSTOM_FORMULA "Enable custom formula" OFF)
-option(MPIR_USE_DLL "Use dll version of MPIR" ON)
+option(IMAGINA_LINUX_PORT "Build the Linux port (GLFW + ImGui + GMP)" OFF)
+option(MPIR_USE_DLL "Use dll version of MPIR (Windows only)" ON)
 set(INCLUDE_PATH "include" CACHE STRING "Include path")
 set(LIBRARY_PATH "lib" CACHE STRING "Library path")
 
+if(NOT WIN32)
+	set(IMAGINA_LINUX_PORT ON CACHE BOOL "Force Linux port off Windows" FORCE)
+endif()
+
 FILE(GLOB SourceFiles "*.cpp")
+
+if(IMAGINA_LINUX_PORT)
+	# Exclude Windows-only entrypoints. Replacements live in main_linux.cpp / LinuxWindow.cpp.
+	list(FILTER SourceFiles EXCLUDE REGEX ".*MainWindow\\.cpp$")
+	list(FILTER SourceFiles EXCLUDE REGEX ".*/main\\.cpp$")
+	list(FILTER SourceFiles EXCLUDE REGEX "^main\\.cpp$")
+endif()
 
 if(ENABLE_CUSTOM_FORMULA)
 	FILE(GLOB SourceFilesEncoder "Encoder/*.cpp")
@@ -15,46 +27,75 @@ else()
 	set(SourceFilesEncoder "")
 endif()
 
-add_executable (Imagina WIN32 ${SourceFiles} ${SourceFilesEncoder} "Resource.rc")
-target_precompile_headers (Imagina PRIVATE "Includes.h")
+if(IMAGINA_LINUX_PORT)
+	add_executable (Imagina ${SourceFiles} ${SourceFilesEncoder})
+else()
+	add_executable (Imagina WIN32 ${SourceFiles} ${SourceFilesEncoder} "Resource.rc")
+	set_source_files_properties("Resource.rc" PROPERTIES LANGUAGE RC)
+endif()
 
-set_source_files_properties("Resource.rc" PROPERTIES LANGUAGE RC)
+target_precompile_headers (Imagina PRIVATE "Includes.h")
 
 target_compile_definitions(Imagina PRIVATE UNICODE)
 
-target_include_directories(Imagina SYSTEM PRIVATE ${INCLUDE_PATH})
-target_include_directories(Imagina SYSTEM PRIVATE "${INCLUDE_PATH}/GL")
-target_link_directories(Imagina PRIVATE ${LIBRARY_PATH})
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-	target_include_directories(Imagina SYSTEM PRIVATE "${INCLUDE_PATH}/Debug")
-    target_link_directories(Imagina PRIVATE "${LIBRARY_PATH}/Debug")
-else()
-	target_include_directories(Imagina SYSTEM PRIVATE "${INCLUDE_PATH}/Release")
-    target_link_directories(Imagina PRIVATE "${LIBRARY_PATH}/Release")
-endif()
+if(IMAGINA_LINUX_PORT)
+	target_compile_definitions(Imagina PRIVATE IMAGINA_LINUX)
 
-target_link_libraries(Imagina "opengl32")
-target_link_libraries(Imagina "comctl32")
-target_link_libraries(Imagina "png16")
-target_link_libraries(Imagina "z")
-target_link_libraries(Imagina "dwmapi")
-target_link_libraries(Imagina "mpirxx")
-target_link_libraries(Imagina "mpir")
-# Wide-character WinMain entry point (project uses wWinMain)
-target_link_options(Imagina PRIVATE "-municode")
+	find_package(PkgConfig REQUIRED)
+	pkg_check_modules(GLFW REQUIRED IMPORTED_TARGET glfw3)
+	pkg_check_modules(GMP REQUIRED IMPORTED_TARGET gmp gmpxx)
+	pkg_check_modules(PNG REQUIRED IMPORTED_TARGET libpng)
+	pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
+	find_package(OpenGL REQUIRED)
 
-if(MPIR_USE_DLL)
-	target_compile_definitions(Imagina PRIVATE MSC_USE_DLL)
+	target_link_libraries(Imagina
+		PkgConfig::GLFW
+		PkgConfig::GMP
+		PkgConfig::PNG
+		PkgConfig::FREETYPE
+		OpenGL::GL
+		pthread
+		dl)
+
+	if(ENABLE_CUSTOM_FORMULA)
+		pkg_check_modules(MPFR REQUIRED IMPORTED_TARGET mpfr)
+		pkg_check_modules(MPC  REQUIRED IMPORTED_TARGET mpc)
+		target_link_libraries(Imagina PkgConfig::MPFR PkgConfig::MPC symengine)
+		target_compile_definitions(Imagina PRIVATE ENABLE_CUSTOM_FORMULA)
+	endif()
 else()
+	target_include_directories(Imagina SYSTEM PRIVATE ${INCLUDE_PATH})
+	target_include_directories(Imagina SYSTEM PRIVATE "${INCLUDE_PATH}/GL")
+	target_link_directories(Imagina PRIVATE ${LIBRARY_PATH})
+	if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+		target_include_directories(Imagina SYSTEM PRIVATE "${INCLUDE_PATH}/Debug")
+		target_link_directories(Imagina PRIVATE "${LIBRARY_PATH}/Debug")
+	else()
+		target_include_directories(Imagina SYSTEM PRIVATE "${INCLUDE_PATH}/Release")
+		target_link_directories(Imagina PRIVATE "${LIBRARY_PATH}/Release")
+	endif()
+
+	target_link_libraries(Imagina "opengl32")
+	target_link_libraries(Imagina "comctl32")
+	target_link_libraries(Imagina "png16")
+	target_link_libraries(Imagina "z")
+	target_link_libraries(Imagina "dwmapi")
 	target_link_libraries(Imagina "mpirxx")
-endif()
+	target_link_libraries(Imagina "mpir")
+	target_link_options(Imagina PRIVATE "-municode")
 
-if(ENABLE_CUSTOM_FORMULA)
-	target_link_libraries(Imagina "mpfr")
-	target_link_libraries(Imagina "mpc")
-	target_link_libraries(Imagina "symengine")
-	
-	target_compile_definitions(Imagina PRIVATE ENABLE_CUSTOM_FORMULA)
+	if(MPIR_USE_DLL)
+		target_compile_definitions(Imagina PRIVATE MSC_USE_DLL)
+	else()
+		target_link_libraries(Imagina "mpirxx")
+	endif()
+
+	if(ENABLE_CUSTOM_FORMULA)
+		target_link_libraries(Imagina "mpfr")
+		target_link_libraries(Imagina "mpc")
+		target_link_libraries(Imagina "symengine")
+		target_compile_definitions(Imagina PRIVATE ENABLE_CUSTOM_FORMULA)
+	endif()
 endif()
 
 set_property(TARGET Imagina PROPERTY CXX_STANDARD 20)

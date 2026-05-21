@@ -4,7 +4,13 @@
 
 #include <fstream>
 #include <png.h>
+#ifdef IMAGINA_LINUX
+#include <gmp.h>
+#include <vector>
+#include <cstring>
+#else
 #include <gmp-impl.h>
+#endif
 #include <stack>
 
 // Temporary file format
@@ -19,6 +25,49 @@ struct IMFileHeader {
 
 extern bool UseDE;
 
+#ifdef IMAGINA_LINUX
+// GMP raw format: 4-byte big-endian header (high bit = sign), then |size| bytes
+// of limb data in MSB-first order. Compatible with MPIR's mpz_out_raw output.
+size_t mpz_inp_raw_stream(mpz_ptr x, std::istream &fp) {
+	unsigned char csize_bytes[4];
+	fp.read((char *)csize_bytes, 4);
+	uint32_t raw = (uint32_t(csize_bytes[0]) << 24) |
+	               (uint32_t(csize_bytes[1]) << 16) |
+	               (uint32_t(csize_bytes[2]) <<  8) |
+	                uint32_t(csize_bytes[3]);
+	bool negative = (raw & 0x80000000u) != 0;
+	size_t byte_count = raw & 0x7FFFFFFFu;
+	if (byte_count == 0) { mpz_set_ui(x, 0); return 4; }
+	std::vector<unsigned char> buf(byte_count);
+	fp.read((char *)buf.data(), byte_count);
+	mpz_import(x, byte_count, 1, 1, 1, 0, buf.data());
+	if (negative) mpz_neg(x, x);
+	return byte_count + 4;
+}
+size_t mpz_out_raw_stream(std::ostream &fp, mpz_srcptr x) {
+	int sign = mpz_sgn(x);
+	if (sign == 0) {
+		unsigned char zero[4] = {0, 0, 0, 0};
+		fp.write((char *)zero, 4);
+		return 4;
+	}
+	size_t byte_count = (mpz_sizeinbase(x, 2) + 7) / 8;
+	std::vector<unsigned char> buf(byte_count);
+	size_t actual = 0;
+	mpz_export(buf.data(), &actual, 1, 1, 1, 0, x);
+	uint32_t raw = uint32_t(actual);
+	if (sign < 0) raw |= 0x80000000u;
+	unsigned char header[4] = {
+		(unsigned char)((raw >> 24) & 0xFF),
+		(unsigned char)((raw >> 16) & 0xFF),
+		(unsigned char)((raw >>  8) & 0xFF),
+		(unsigned char)( raw        & 0xFF),
+	};
+	fp.write((char *)header, 4);
+	fp.write((char *)buf.data(), actual);
+	return actual + 4;
+}
+#else
 size_t mpz_inp_raw_stream(mpz_ptr x, std::istream &fp) {
 	unsigned char  csize_bytes[4];
 	mpir_out_struct out;
@@ -48,6 +97,7 @@ size_t mpz_out_raw_stream(std::ostream &fp, mpz_srcptr x) {
 	(*gmp_free_func) (out->allocated, out->allocatedSize);
 	return out->writtenSize;
 }
+#endif
 size_t mpf_out_raw_stream(std::ostream &f, mpf_srcptr X) {
 	long int expt; mpz_t Z; int nz;
 	expt = X->_mp_exp;
