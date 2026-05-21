@@ -59,8 +59,59 @@ static void framebuffer_size_cb(GLFWwindow * /*w*/, int width, int height) {
 }
 
 static void cursor_pos_cb(GLFWwindow * /*w*/, double x, double y) {
-	MouseX = (int32_t)x;
-	MouseY = (int32_t)y;
+	int32_t nx = (int32_t)x;
+	int32_t ny = (int32_t)y;
+	if (Panning) {
+		double MovementX = -double(nx - MouseX) / WindowHeight * 2.0;
+		double MovementY =  double(ny - MouseY) / WindowHeight * 2.0;
+		double FractalMovementX = Global::InvTransformMatrix[0][0] * MovementX + Global::InvTransformMatrix[1][0] * MovementY;
+		double FractalMovementY = Global::InvTransformMatrix[0][1] * MovementX + Global::InvTransformMatrix[1][1] * MovementY;
+		Global::moved = true;
+		FContext.Move(FractalMovementX, FractalMovementY);
+	}
+	MouseX = nx;
+	MouseY = ny;
+	Global::Redraw = true;
+}
+
+static void mouse_button_cb(GLFWwindow *w, int button, int action, int /*mods*/) {
+	if (button == GLFW_MOUSE_BUTTON_LEFT) {
+		Panning = (action == GLFW_PRESS);
+		double cx, cy;
+		glfwGetCursorPos(w, &cx, &cy);
+		MouseX = (int32_t)cx;
+		MouseY = (int32_t)cy;
+	}
+}
+
+static void scroll_cb(GLFWwindow *w, double /*xoffset*/, double yoffset) {
+	double cx, cy;
+	glfwGetCursorPos(w, &cx, &cy);
+	SRReal X =  (SRReal((int)cx) - (double)WindowWidth  * 0.5) / WindowHeight * 2.0;
+	SRReal Y = -(SRReal((int)cy) / WindowHeight * 2.0 - 1.0);
+	SRReal FractalX = Global::InvTransformMatrix[0][0] * X + Global::InvTransformMatrix[1][0] * Y;
+	SRReal FractalY = Global::InvTransformMatrix[0][1] * X + Global::InvTransformMatrix[1][1] * Y;
+	if (yoffset > 0) FContext.ZoomIn(FractalX, FractalY);
+	else if (yoffset < 0) FContext.ZoomOut(FractalX, FractalY);
+}
+
+static void key_cb(GLFWwindow * /*w*/, int key, int /*scancode*/, int action, int /*mods*/) {
+	if (action != GLFW_PRESS && action != GLFW_REPEAT) {
+		if (action == GLFW_RELEASE && (key == GLFW_KEY_E || key == GLFW_KEY_R)) {
+			Global::ColorCyclingSpeed = 0.0;
+			Global::Redraw = true;
+		}
+		return;
+	}
+	switch (key) {
+		case GLFW_KEY_A: Global::ItDiv = std::max(8.0_sr, Global::ItDiv / 2); Global::Redraw = true; break;
+		case GLFW_KEY_S: Global::ItDiv = std::min(0x1p48_sr, Global::ItDiv * 2); Global::Redraw = true; break;
+		case GLFW_KEY_E: Global::ColorCyclingSpeed = -0.1; Global::Redraw = true; break;
+		case GLFW_KEY_R: Global::ColorCyclingSpeed =  0.1; Global::Redraw = true; break;
+		case GLFW_KEY_D: Global::ItLim = std::min(UINT64_C(1) << 48, Global::ItLim * 2); FContext.ParameterChanged = true; break;
+		case GLFW_KEY_F: Global::ItLim = std::max(UINT64_C(8), Global::ItLim / 2);       FContext.ParameterChanged = true; break;
+		default: break;
+	}
 }
 
 // argv[i] (UTF-8) -> wchar_t** for ParseCLI.
@@ -140,6 +191,9 @@ int main(int argc, char **argv) {
 
 	glfwSetFramebufferSizeCallback(g_glfw_window, framebuffer_size_cb);
 	glfwSetCursorPosCallback(g_glfw_window, cursor_pos_cb);
+	glfwSetMouseButtonCallback(g_glfw_window, mouse_button_cb);
+	glfwSetScrollCallback(g_glfw_window, scroll_cb);
+	glfwSetKeyCallback(g_glfw_window, key_cb);
 
 	InitRenderResources();
 	Computation::Init();
