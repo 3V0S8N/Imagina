@@ -17,10 +17,22 @@
 #include <string>
 #include <vector>
 #include "tinyfiledialogs.h"
+#include "imgui.h"
+#include "backends/imgui_impl_glfw.h"
+#include "backends/imgui_impl_opengl3.h"
 
 void OpenFile(wchar_t *FileName, size_t ExtensionOffset = 0);
 void SaveImage(wchar_t *FileName);
 void SaveFile(wchar_t *FileName, FileType Type);
+
+// Forward declarations of globals defined below (so the menu-bar code can use them).
+extern GLFWwindow *g_glfw_window;
+extern bool UseDE;
+extern bool UseLinearApproximation;
+extern bool UsePalleteMipmaps;
+void SetFractalType(FractalTypeEnum Type);
+extern FractalTypeEnum CurrentFractalType;
+static void toggle_fullscreen(GLFWwindow *w);
 
 static std::wstring utf8_to_wide(const char *s) {
 	if (!s) return {};
@@ -76,6 +88,107 @@ static void save_location_dialog() {
 static bool g_is_fullscreen = false;
 static int g_windowed_x = 0, g_windowed_y = 0;
 static int g_windowed_w = 0, g_windowed_h = 0;
+
+// === Dear ImGui menu bar ============================================
+static bool g_show_iter_dialog = false;
+static bool g_show_about       = false;
+static int  g_iter_dialog_buf  = 0;
+
+static void reset_location() {
+	FContext.CurrentLocation = { 0.0, 0.0, 2.0 };
+	FContext.RenderLocation  = FContext.CurrentLocation;
+	FContext.EvalLocation    = FContext.CurrentLocation;
+	FContext.InvalidateAll();
+}
+
+static void set_fractal_via_menu(FractalTypeEnum t) {
+	SetFractalType(t);
+	FContext.InvalidateAll();
+}
+
+static void draw_menu_bar() {
+	if (!ImGui::BeginMainMenuBar()) return;
+	if (ImGui::BeginMenu("File")) {
+		if (ImGui::MenuItem("Open location...",  "Ctrl+O"))       open_location_dialog();
+		if (ImGui::MenuItem("Save location...",  "Ctrl+S"))       save_location_dialog();
+		if (ImGui::MenuItem("Save image (PNG)...", "Ctrl+Shift+S")) save_image_dialog();
+		ImGui::Separator();
+		if (ImGui::MenuItem("Quit"))             glfwSetWindowShouldClose(g_glfw_window, GLFW_TRUE);
+		ImGui::EndMenu();
+	}
+	if (ImGui::BeginMenu("Fractal")) {
+		if (ImGui::BeginMenu("Formula")) {
+			if (ImGui::MenuItem("Mandelbrot",   nullptr, CurrentFractalType == FractalTypeEnum::Mandelbrot))   set_fractal_via_menu(FractalTypeEnum::Mandelbrot);
+			if (ImGui::MenuItem("Tricorn",      nullptr, CurrentFractalType == FractalTypeEnum::Tricorn))      set_fractal_via_menu(FractalTypeEnum::Tricorn);
+			if (ImGui::MenuItem("Burning ship", nullptr, CurrentFractalType == FractalTypeEnum::BurningShip)) set_fractal_via_menu(FractalTypeEnum::BurningShip);
+			if (ImGui::MenuItem("Nova",         nullptr, CurrentFractalType == FractalTypeEnum::Nova))         set_fractal_via_menu(FractalTypeEnum::Nova);
+			ImGui::EndMenu();
+		}
+		ImGui::Separator();
+		if (ImGui::MenuItem("Distance estimation", nullptr, UseDE)) { UseDE = !UseDE; FContext.ParameterChanged = true; }
+		ImGui::Separator();
+		if (ImGui::MenuItem("Reset location"))                 reset_location();
+		if (ImGui::MenuItem("Iteration limit..."))             { g_show_iter_dialog = true; g_iter_dialog_buf = (int)Global::ItLim; }
+		ImGui::Separator();
+		if (ImGui::MenuItem("Increase color density (A)"))     { Global::ItDiv = std::max(8.0_sr,    Global::ItDiv / 2); Global::Redraw = true; }
+		if (ImGui::MenuItem("Decrease color density (S)"))     { Global::ItDiv = std::min(0x1p48_sr, Global::ItDiv * 2); Global::Redraw = true; }
+		if (ImGui::MenuItem("Increase iteration limit (D)"))   { Global::ItLim = std::min(UINT64_C(1) << 48, Global::ItLim * 2); FContext.ParameterChanged = true; FContext.RecomputeReference = true; }
+		if (ImGui::MenuItem("Decrease iteration limit (F)"))   { Global::ItLim = std::max(UINT64_C(8),       Global::ItLim / 2); FContext.ParameterChanged = true; }
+		ImGui::EndMenu();
+	}
+	if (ImGui::BeginMenu("Computation")) {
+		if (ImGui::MenuItem("Linear approximation", nullptr, UseLinearApproximation)) { UseLinearApproximation = !UseLinearApproximation; FContext.RecomputeReference = true; }
+		if (ImGui::MenuItem("Lock reference",       nullptr, FContext.LockReference)) { FContext.LockReference   = !FContext.LockReference; }
+		ImGui::Separator();
+		if (ImGui::MenuItem("Recompute reference")) { FContext.RecomputeReference = true; }
+		if (ImGui::MenuItem("Recompute all"))       { FContext.InvalidateAll(); }
+		ImGui::EndMenu();
+	}
+	if (ImGui::BeginMenu("Image")) {
+		if (ImGui::MenuItem("Toggle fullscreen", "F11")) toggle_fullscreen(g_glfw_window);
+		if (ImGui::MenuItem("Palette mipmaps", nullptr, UsePalleteMipmaps)) { UsePalleteMipmaps = !UsePalleteMipmaps; Global::Redraw = true; }
+		ImGui::EndMenu();
+	}
+	if (ImGui::BeginMenu("Help")) {
+		if (ImGui::MenuItem("About Imagina (Linux port)")) g_show_about = true;
+		ImGui::EndMenu();
+	}
+	ImGui::EndMainMenuBar();
+}
+
+static void draw_iter_dialog() {
+	if (!g_show_iter_dialog) return;
+	ImGui::SetNextWindowSize(ImVec2(320, 120), ImGuiCond_Once);
+	if (ImGui::Begin("Iteration limit", &g_show_iter_dialog,
+		ImGuiWindowFlags_NoCollapse)) {
+		ImGui::InputInt("Iterations", &g_iter_dialog_buf, 1024, 16384);
+		if (g_iter_dialog_buf < 8) g_iter_dialog_buf = 8;
+		if (ImGui::Button("Apply")) {
+			Global::ItLim = (uint64_t)g_iter_dialog_buf;
+			FContext.ParameterChanged = true;
+			FContext.RecomputeReference = true;
+			g_show_iter_dialog = false;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) g_show_iter_dialog = false;
+	}
+	ImGui::End();
+}
+
+static void draw_about() {
+	if (!g_show_about) return;
+	ImGui::SetNextWindowSize(ImVec2(400, 180), ImGuiCond_Once);
+	if (ImGui::Begin("About", &g_show_about,
+		ImGuiWindowFlags_NoCollapse)) {
+		ImGui::Text("Imagina -- Linux Port");
+		ImGui::Separator();
+		ImGui::TextWrapped("Fractal renderer built on perturbation theory + linear approximation. "
+			"Original Windows code by Zhuoran. Linux port via GLFW + ImGui + FreeType + GMP.");
+		ImGui::Separator();
+		if (ImGui::Button("Close")) g_show_about = false;
+	}
+	ImGui::End();
+}
 
 static void toggle_fullscreen(GLFWwindow *w) {
 	if (!g_is_fullscreen) {
@@ -283,6 +396,13 @@ int main(int argc, char **argv) {
 	glfwSetScrollCallback(g_glfw_window, scroll_cb);
 	glfwSetKeyCallback(g_glfw_window, key_cb);
 
+	// ImGui setup.
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGui::StyleColorsDark();
+	ImGui_ImplGlfw_InitForOpenGL(g_glfw_window, true);
+	ImGui_ImplOpenGL3_Init("#version 130");
+
 	InitRenderResources();
 	Computation::Init();
 
@@ -307,12 +427,26 @@ int main(int argc, char **argv) {
 		Global::Redraw = false;
 		if (Global::ColorCyclingSpeed != 0.0) Global::Redraw = true;
 
+		// ImGui frame on top of the fractal.
+		ImGui_ImplOpenGL3_NewFrame();
+		ImGui_ImplGlfw_NewFrame();
+		ImGui::NewFrame();
+		draw_menu_bar();
+		draw_iter_dialog();
+		draw_about();
+		ImGui::Render();
+		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
 		EndRender();
 
 		UpdateWindowTitle();
 		CheckAutoRenderComplete();
 		CheckFrameSequenceProgress();
 	}
+
+	ImGui_ImplOpenGL3_Shutdown();
+	ImGui_ImplGlfw_Shutdown();
+	ImGui::DestroyContext();
 
 	FContext.pixelManager.Abort();
 	while (!FContext.pixelManager.Completed()) {}

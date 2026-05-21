@@ -335,7 +335,11 @@ void UpdateWindowTitle() {
 	    (now - last_update) < std::chrono::milliseconds(200)) return;
 	last_update = now;
 
+#ifdef IMAGINA_LINUX
+	if (!g_glfw_window) return;
+#else
 	if (!HWnd) return;
+#endif
 	if (!Global::Initialized) return;
 
 	// log10(mag) from HalfH = mant * 2^exp.

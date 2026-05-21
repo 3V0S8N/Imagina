@@ -41,9 +41,21 @@ endif()
 if(IMAGINA_LINUX_PORT)
 	# Vendored single-file file-dialog lib (zlib license).
 	set(TFD_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyfiledialogs.c")
-	add_executable (Imagina ${SourceFiles} ${SourceFilesEncoder} ${TFD_SOURCES})
-	target_include_directories(Imagina PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
-	set_source_files_properties("${TFD_SOURCES}" PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+	# Vendored Dear ImGui (MIT license).
+	set(IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui")
+	set(IMGUI_SOURCES
+		"${IMGUI_DIR}/imgui.cpp"
+		"${IMGUI_DIR}/imgui_draw.cpp"
+		"${IMGUI_DIR}/imgui_widgets.cpp"
+		"${IMGUI_DIR}/imgui_tables.cpp"
+		"${IMGUI_DIR}/backends/imgui_impl_glfw.cpp"
+		"${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp")
+	add_executable (Imagina ${SourceFiles} ${SourceFilesEncoder} ${TFD_SOURCES} ${IMGUI_SOURCES})
+	target_include_directories(Imagina PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}/third_party"
+		"${IMGUI_DIR}"
+		"${IMGUI_DIR}/backends")
+	set_source_files_properties("${TFD_SOURCES}" ${IMGUI_SOURCES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 else()
 	add_executable (Imagina WIN32 ${SourceFiles} ${SourceFilesEncoder} "Resource.rc")
 	set_source_files_properties("Resource.rc" PROPERTIES LANGUAGE RC)
