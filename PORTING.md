@@ -77,13 +77,15 @@ modulo overlay text (currently disabled on Linux — Phase 3).
 - Path separator: `\` → `/` in `CheckFrameSequenceProgress`
 - Locale: `setlocale(LC_NUMERIC, "C")` so CLI decimal parsing works on de_DE
 
-## Phase 4 (optional): Menus and modal dialogs via ImGui
+## Phase 4-6 (DONE): Full Windows-parity GUI
 
-Only thing the current Linux build lacks vs Windows: a menu bar and
-8 modal parameter-input dialogs. Workaround until then is keyboard
-shortcuts + Ctrl+O / Ctrl+S, which already cover the common workflow.
+ImGui menu bar, all 8 modal dialogs (Location, Iteration limit, Image
+size, Transformation, Reference saving, Tasks, Custom formula, Feature),
+and double-click-to-open-feature handler are all in place.
 
-Estimated 1-2 weeks of focused work.
+Linux build now matches the Windows feature surface 1:1 (modulo
+`ENABLE_CUSTOM_FORMULA`, which requires symengine and stays off by
+default on both platforms).
 
 ## Phase 4 (polish)
 

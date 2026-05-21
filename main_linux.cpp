@@ -99,6 +99,9 @@ static bool g_show_transform_dialog  = false;
 static bool g_show_refsave_dialog    = false;
 static bool g_show_tasks_dialog      = false;
 static bool g_show_about             = false;
+static bool g_show_formula_dialog    = false;
+static bool g_show_feature_dialog    = false;
+static char g_formula_buf[256]       = {0};
 
 static int      g_iter_dialog_buf       = 0;
 static char     g_loc_real_buf[128]     = {0};
@@ -201,6 +204,10 @@ static void draw_menu_bar() {
 			if (ImGui::MenuItem("Tricorn",      nullptr, CurrentFractalType == FractalTypeEnum::Tricorn))      set_fractal_via_menu(FractalTypeEnum::Tricorn);
 			if (ImGui::MenuItem("Burning ship", nullptr, CurrentFractalType == FractalTypeEnum::BurningShip)) set_fractal_via_menu(FractalTypeEnum::BurningShip);
 			if (ImGui::MenuItem("Nova",         nullptr, CurrentFractalType == FractalTypeEnum::Nova))         set_fractal_via_menu(FractalTypeEnum::Nova);
+			if (ImGui::MenuItem("Custom...",    nullptr, CurrentFractalType == FractalTypeEnum::Custom)) {
+				g_show_formula_dialog = true;
+				std::snprintf(g_formula_buf, sizeof(g_formula_buf), "%s", Global::CustomFormula.c_str());
+			}
 			ImGui::EndMenu();
 		}
 		ImGui::Separator();
@@ -409,6 +416,69 @@ static void draw_refsave_dialog() {
 	ImGui::End();
 }
 
+static void draw_formula_dialog() {
+	if (!g_show_formula_dialog) return;
+	ImGui::SetNextWindowSize(ImVec2(480, 160), ImGuiCond_Once);
+	if (ImGui::Begin("Custom formula", &g_show_formula_dialog, ImGuiWindowFlags_NoCollapse)) {
+		ImGui::TextWrapped("Enter a formula in terms of z and c, e.g. \"z^2 + c\" for Mandelbrot.");
+#ifndef ENABLE_CUSTOM_FORMULA
+		ImGui::TextColored(ImVec4(1, 0.7f, 0, 1),
+			"Note: Imagina was built without ENABLE_CUSTOM_FORMULA; the formula "
+			"will be saved but the renderer falls back to Mandelbrot.");
+#endif
+		ImGui::InputText("Formula", g_formula_buf, sizeof(g_formula_buf));
+		if (ImGui::Button("Apply")) {
+			Global::CustomFormula = g_formula_buf;
+			SetFractalType(FractalTypeEnum::Custom);
+			FContext.InvalidateAll();
+			g_show_formula_dialog = false;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) g_show_formula_dialog = false;
+	}
+	ImGui::End();
+}
+
+static void draw_feature_dialog() {
+	if (!g_show_feature_dialog) return;
+	ImGui::SetNextWindowSize(ImVec2(460, 220), ImGuiCond_Once);
+	bool keep = g_show_feature_dialog;
+	if (ImGui::Begin("Feature", &keep, ImGuiWindowFlags_NoCollapse)) {
+		Evaluator::Feature *Feature = FContext.Feature;
+		if (!Feature) {
+			ImGui::Text("No feature under cursor.");
+		} else {
+			std::wstring_view name = Feature->Name();
+			std::wstring_view info = Feature->Information();
+			if (!name.empty()) {
+				std::mbstate_t st{};
+				const wchar_t *p = name.data();
+				char buf[256];
+				size_t len = std::wcsrtombs(buf, &p, sizeof(buf) - 1, &st);
+				if (len != size_t(-1)) { buf[len] = 0; ImGui::Text("Name: %s", buf); }
+			}
+			if (!info.empty()) {
+				std::mbstate_t st{};
+				const wchar_t *p = info.data();
+				char buf[1024];
+				size_t len = std::wcsrtombs(buf, &p, sizeof(buf) - 1, &st);
+				if (len != size_t(-1)) { buf[len] = 0; ImGui::TextWrapped("%s", buf); }
+			}
+			ImGui::Separator();
+			if (ImGui::Button("Center on feature")) {
+				RelLocation NewLoc = FContext.CurrentLocation;
+				Feature->GetCoordinate(NewLoc.X, NewLoc.Y);
+				FContext.ChangeLocation(NewLoc);
+				g_show_feature_dialog = false;
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Close")) g_show_feature_dialog = false;
+		}
+	}
+	ImGui::End();
+	g_show_feature_dialog = keep && g_show_feature_dialog;
+}
+
 static void draw_tasks_dialog() {
 	if (!g_show_tasks_dialog) return;
 	ImGui::SetNextWindowSize(ImVec2(420, 220), ImGuiCond_Once);
@@ -519,6 +589,23 @@ static void mouse_button_cb(GLFWwindow *w, int button, int action, int /*mods*/)
 		glfwGetCursorPos(w, &cx, &cy);
 		MouseX = (int32_t)cx;
 		MouseY = (int32_t)cy;
+
+		// Detect double-click on press: two presses within 350ms at same pixel.
+		if (action == GLFW_PRESS) {
+			static double last_press_time = 0.0;
+			static int32_t last_press_x = -1000, last_press_y = -1000;
+			double now = glfwGetTime();
+			if ((now - last_press_time) < 0.35 &&
+			    std::abs(MouseX - last_press_x) < 5 &&
+			    std::abs(MouseY - last_press_y) < 5) {
+				if (FContext.Feature) g_show_feature_dialog = true;
+				last_press_time = 0.0; // consume
+			} else {
+				last_press_time = now;
+				last_press_x = MouseX;
+				last_press_y = MouseY;
+			}
+		}
 	}
 }
 
@@ -688,6 +775,8 @@ int main(int argc, char **argv) {
 		draw_transform_dialog();
 		draw_refsave_dialog();
 		draw_tasks_dialog();
+		draw_formula_dialog();
+		draw_feature_dialog();
 		draw_about();
 		ImGui::Render();
 		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
