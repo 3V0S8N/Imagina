@@ -16,6 +16,9 @@
 
 #define GLEW_STATIC
 #else
+// On Linux libGL exports every GL >= 2.0 entrypoint directly; turn on the
+// prototype declarations so call sites compile without going through function
+// pointers (which is the Windows path via wglGetProcAddress).
 #define GL_GLEXT_PROTOTYPES
 #endif
 #if __has_include(<GL/gl.h>)

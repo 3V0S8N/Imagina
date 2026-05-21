@@ -13,6 +13,13 @@
 #endif
 #include <stack>
 
+// Forward declarations: SetFractalType lives in MainWindow.cpp on Windows and
+// in main_linux.cpp on Linux. HWnd lives in MainWindow.cpp/main_linux.cpp.
+void SetFractalType(FractalTypeEnum Type);
+#ifdef IMAGINA_LINUX
+extern void *HWnd;
+#endif
+
 // Temporary file format
 constexpr uint64_t IMMagicNumber = 0x000A0D56504D49FF;
 
@@ -165,7 +172,7 @@ void LoadImFile(std::istream &File) {
 	FContext.RenderLocation = FContext.CurrentLocation;
 	FContext.EvalLocation = FContext.CurrentLocation;
 
-	uint64_t Precision = -std::min(0ll, FContext.CurrentLocation.HalfH.Exponent) + 64;
+	uint64_t Precision = -std::min<int64_t>(0, FContext.CurrentLocation.HalfH.Exponent) + 64;
 	SetDefaultPrecision(Precision);
 	FContext.CenterCoordinate.X.set_prec(Precision);
 	FContext.CenterCoordinate.Y.set_prec(Precision);
@@ -258,7 +265,7 @@ void LoadImtFile(std::istream &File) {
 			HRReal HalfH = HRReal(mpf_class(Parameters.at("Location.Size"), 52, -16));
 
 			if (HalfH > 16.0_hr) HalfH = 16.0_hr;
-			uint64_t Precision = -std::min(0ll, HalfH.Exponent) + 64;
+			uint64_t Precision = -std::min<int64_t>(0, HalfH.Exponent) + 64;
 
 			Coordinate NewCoordinate{ mpf_class(Parameters.at("Location.Re"), Precision, 16), mpf_class(Parameters.at("Location.Im"), Precision, -16) };
 
@@ -296,7 +303,7 @@ void LoadKfFile(std::istream &File, bool IsKfr) {
 				HRReal HalfH = 2.0_hr / HRReal(mpf_class(Zoom->second, 52));
 
 				if (HalfH > 16.0_hr) HalfH = 16.0_hr;
-				uint64_t Precision = -std::min(0ll, HalfH.Exponent) + 64;
+				uint64_t Precision = -std::min<int64_t>(0, HalfH.Exponent) + 64;
 
 				Coordinate NewCoordinate{ mpf_class(Parameters.at("Re"), Precision), mpf_class(Parameters.at("Im"), Precision) };
 
@@ -347,13 +354,22 @@ void LoadKfFile(std::istream &File, bool IsKfr) {
 
 void OpenFile(wchar_t *FileName, size_t ExtensionOffset) {
 	using enum FileType;
+#ifdef IMAGINA_LINUX
+	std::string FileNameUtf8 = imagina_wchar_to_utf8(FileName);
+	std::ifstream OpenFile(FileNameUtf8, std::ifstream::in | std::ifstream::binary);
+#else
 	std::ifstream OpenFile(FileName, std::ifstream::in | std::ifstream::binary);
+#endif
 
 	FileType Type = DetermineFileType(OpenFile, ExtensionOffset ? FileName + ExtensionOffset : L"");
 
 	if (Type != Imagina) {
 		OpenFile.close();
+#ifdef IMAGINA_LINUX
+		OpenFile.open(FileNameUtf8, std::ifstream::in);
+#else
 		OpenFile.open(FileName, std::ifstream::in);
+#endif
 	}
 
 	switch (Type) {
@@ -468,26 +484,33 @@ void SaveImtFile(std::ostream &File) {
 
 void SaveFile(wchar_t *FileName, FileType Type) {
 	using enum FileType;
+#ifdef IMAGINA_LINUX
+	std::string FileNameUtf8 = imagina_wchar_to_utf8(FileName);
+	#define IM_SAVE_NAME FileNameUtf8
+#else
+	#define IM_SAVE_NAME FileName
+#endif
 	switch (Type) {
 		case Imagina: {
-			std::ofstream File(FileName, std::ofstream::out | std::ofstream::binary);
+			std::ofstream File(IM_SAVE_NAME, std::ofstream::out | std::ofstream::binary);
 			SaveImFile(File);
 			File.close();
 			break;
 		}
 		case ImaginaText: {
-			std::ofstream File(FileName, std::ofstream::out);
+			std::ofstream File(IM_SAVE_NAME, std::ofstream::out);
 			SaveImtFile(File);
 			File.close();
 			break;
 		}
 		case Kfr: {
-			std::ofstream File(FileName, std::ofstream::out);
+			std::ofstream File(IM_SAVE_NAME, std::ofstream::out);
 			SaveKfrFile(File);
 			File.close();
 			break;
 		}
 	}
+	#undef IM_SAVE_NAME
 }
 
 void SaveImage(wchar_t *FileName) {
@@ -596,7 +619,12 @@ void SaveRawPixelData(wchar_t *FileName) {
 #ifdef USE_BASIC_PIXEL_MANAGER
 	MessageBoxW(nullptr, L"Unsupported", nullptr, MB_OK | MB_TASKMODAL | MB_ICONERROR);
 #else
+#ifdef IMAGINA_LINUX
+	std::string FileNameUtf8 = imagina_wchar_to_utf8(FileName);
+	std::ofstream File(FileNameUtf8, std::ofstream::out | std::ofstream::binary);
+#else
 	std::ofstream File(FileName, std::ofstream::out | std::ofstream::binary);
+#endif
 
 	int32_t width = FContext.pixelManager.Width, height = FContext.pixelManager.Height;
 

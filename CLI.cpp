@@ -7,7 +7,24 @@
 void OpenFile(wchar_t *FileName, size_t ExtensionOffset = 0);
 void SaveImage(wchar_t *FileName);
 
+#ifdef IMAGINA_LINUX
+// On Linux there is no HWND. Use GLFW window pointer (or null in headless mode).
+#include <GLFW/glfw3.h>
+extern GLFWwindow *g_glfw_window;
+extern void *HWnd; // void* stub from main_linux.cpp; only checked for non-null.
+static void imagina_post_quit() {
+	if (g_glfw_window) glfwSetWindowShouldClose(g_glfw_window, GLFW_TRUE);
+}
+#define PostQuitMessage(code) imagina_post_quit()
+static void imagina_set_window_title(const wchar_t *title) {
+	if (!g_glfw_window || !title) return;
+	std::string utf8 = imagina_wchar_to_utf8(title);
+	glfwSetWindowTitle(g_glfw_window, utf8.c_str());
+}
+#define SetWindowTextW(hwnd, str) imagina_set_window_title(str)
+#else
 extern HWND HWnd;
+#endif
 
 // Build overlay text.
 static void BuildOverlayText() {
@@ -268,8 +285,13 @@ bool CheckFrameSequenceProgress() {
 
 	// Save frame.
 	wchar_t path[1024];
+#ifdef IMAGINA_LINUX
+	swprintf(path, 1024, L"%ls/frame_%05llu.png",
+	         g_cli.frames_dir.c_str(),
+#else
 	swprintf(path, 1024, L"%ls\\frame_%05llu.png",
 	         g_cli.frames_dir.c_str(),
+#endif
 	         (unsigned long long)g_cli.frame_index);
 	BuildOverlayText();
 	SaveImage(path);

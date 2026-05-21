@@ -4,6 +4,12 @@
 
 std::wstring g_overlay_text;
 
+#ifdef IMAGINA_LINUX
+// Linux Phase 2: skip in-image text overlay. Re-introduce in Phase 3 with FreeType.
+void DrawTextOverlay(uint8_t * /*rgba*/, int /*width*/, int /*height*/,
+                     const wchar_t * /*text*/, int /*x*/, int /*y*/) {
+}
+#else
 void DrawTextOverlay(uint8_t *rgba, int width, int height,
                      const wchar_t *text, int x, int y) {
 	if (!text || !*text || !rgba || width <= 0 || height <= 0) return;
@@ -101,3 +107,4 @@ void DrawTextOverlay(uint8_t *rgba, int width, int height,
 	DeleteObject(dib);
 	DeleteDC(memDC);
 }
+#endif

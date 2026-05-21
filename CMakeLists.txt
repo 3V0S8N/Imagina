@@ -26,7 +26,7 @@ if(IMAGINA_LINUX_PORT)
 	#   GLUtils.cpp: wglGetProcAddress (uses glXGetProcAddress on Linux)
 	#   Render.cpp: SwapBuffers + heavy GL state setup
 	#   PixelManager.cpp: GL texture pipeline
-	foreach(skip CLI Overlay File GLUtils Render PixelManager)
+	foreach(skip)
 		list(FILTER SourceFiles EXCLUDE REGEX ".*/${skip}\\.cpp$")
 		list(FILTER SourceFiles EXCLUDE REGEX "^${skip}\\.cpp$")
 	endforeach()

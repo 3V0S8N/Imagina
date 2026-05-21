@@ -1,6 +1,11 @@
 #ifndef _GLUTIL_H_
 #define _GLUTIL_H_
 
+#ifndef IMAGINA_LINUX
+// On Windows we have to load every GL >= 1.2 function via wglGetProcAddress
+// and call them through function pointers. On Linux libGL exports them as
+// real symbols so the pointers (and InitGLExtensions) are unnecessary.
+
 // PLATFORM DEPENDENT
 extern PFNGLCREATEPROGRAMPROC glCreateProgram;
 extern PFNGLCREATESHADERPROC glCreateShader;
@@ -31,6 +36,7 @@ extern PFNWGLSWAPINTERVALEXTPROC		wglSwapIntervalEXT;
 
 extern PFNGLGETSHADERINFOLOGPROC		glGetShaderInfoLog;
 extern PFNGLGETPROGRAMINFOLOGPROC		glGetProgramInfoLog;
+#endif
 
 void InitGLExtensions();
 

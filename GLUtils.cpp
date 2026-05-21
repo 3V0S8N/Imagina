@@ -1,5 +1,9 @@
 #include "Includes.h"
+#include "GLUtils.h"
 #include <iostream>
+
+#ifndef IMAGINA_LINUX
+// === Windows: load all GL >= 1.2 functions via wglGetProcAddress.
 
 PFNGLCREATEPROGRAMPROC	glCreateProgram;
 PFNGLCREATESHADERPROC	glCreateShader;
@@ -42,7 +46,7 @@ void InitGLExtensions() {
 	glAttachShader	= (PFNGLATTACHSHADERPROC)	wglGetProcAddress("glAttachShader");
 	glLinkProgram	= (PFNGLLINKPROGRAMPROC)	wglGetProcAddress("glLinkProgram");
 	glUseProgram	= (PFNGLUSEPROGRAMPROC)		wglGetProcAddress("glUseProgram");
-	
+
 	glGenVertexArrays			= (PFNGLGENVERTEXARRAYSPROC)			wglGetProcAddress("glGenVertexArrays");
 	glBindVertexArray			= (PFNGLBINDVERTEXARRAYPROC)			wglGetProcAddress("glBindVertexArray");
 	glGenBuffers				= (PFNGLGENBUFFERSPROC)					wglGetProcAddress("glGenBuffers");
@@ -62,6 +66,10 @@ void InitGLExtensions() {
 	glGetShaderInfoLog			= (PFNGLGETSHADERINFOLOGPROC)			wglGetProcAddress("glGetShaderInfoLog");
 	glGetProgramInfoLog			= (PFNGLGETPROGRAMINFOLOGPROC)			wglGetProcAddress("glGetProgramInfoLog");
 }
+#else
+// === Linux: libGL provides all >= 1.2 functions natively; nothing to load.
+void InitGLExtensions() {}
+#endif
 
 GLuint LoadShaders(const char *VSSource, const char *FSSource) {
 	GLuint Program = glCreateProgram();

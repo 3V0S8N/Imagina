@@ -1,5 +1,11 @@
 #include "Includes.h"
 #include "GLUtils.h"
+#ifdef IMAGINA_LINUX
+// MainWindow.h is excluded on Linux; these globals live in main_linux.cpp.
+extern size_t WindowWidth;
+extern size_t WindowHeight;
+extern int32_t MouseX, MouseY;
+#endif
 
 const char *VertexShaderSource = "			\
 #version 130								\n\
@@ -141,7 +147,13 @@ void InitRenderResources() {
 
 	auto err = glGetError();
 
-	if (err != GL_NO_ERROR) __debugbreak();
+	if (err != GL_NO_ERROR) {
+#ifdef _WIN32
+		__debugbreak();
+#else
+		__builtin_trap();
+#endif
+	}
 
 	ResizeViewport(InitialWindowWidth, InitialWindowHeight);
 }
@@ -273,8 +285,17 @@ void BeginRender() {
 	glViewport((WindowWidth - ViewWidth) / 2, (WindowHeight - ViewHeight) / 2, ViewWidth, ViewHeight);
 }
 
+#ifdef IMAGINA_LINUX
+#include <GLFW/glfw3.h>
+extern GLFWwindow *g_glfw_window;
+#endif
+
 void EndRender() {
+#ifdef IMAGINA_LINUX
+	if (g_glfw_window) glfwSwapBuffers(g_glfw_window);
+#else
 	SwapBuffers(MainDC);
+#endif
 }
 
 void EnablePaletteMipmap(bool Enable) {
