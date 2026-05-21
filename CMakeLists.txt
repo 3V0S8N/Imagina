@@ -39,7 +39,11 @@ else()
 endif()
 
 if(IMAGINA_LINUX_PORT)
-	add_executable (Imagina ${SourceFiles} ${SourceFilesEncoder})
+	# Vendored single-file file-dialog lib (zlib license).
+	set(TFD_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyfiledialogs.c")
+	add_executable (Imagina ${SourceFiles} ${SourceFilesEncoder} ${TFD_SOURCES})
+	target_include_directories(Imagina PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
+	set_source_files_properties("${TFD_SOURCES}" PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 else()
 	add_executable (Imagina WIN32 ${SourceFiles} ${SourceFilesEncoder} "Resource.rc")
 	set_source_files_properties("Resource.rc" PROPERTIES LANGUAGE RC)

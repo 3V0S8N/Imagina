@@ -7,6 +7,7 @@
 #include "Global.h"
 #include "CLI.h"
 
+#include "File.h"
 #include <GLFW/glfw3.h>
 #include <cstdio>
 #include <cstdlib>
@@ -15,6 +16,80 @@
 #include <cwchar>
 #include <string>
 #include <vector>
+#include "tinyfiledialogs.h"
+
+void OpenFile(wchar_t *FileName, size_t ExtensionOffset = 0);
+void SaveImage(wchar_t *FileName);
+void SaveFile(wchar_t *FileName, FileType Type);
+
+static std::wstring utf8_to_wide(const char *s) {
+	if (!s) return {};
+	std::mbstate_t state{};
+	std::wstring out;
+	while (*s) {
+		wchar_t wc;
+		size_t consumed = std::mbrtowc(&wc, s, MB_CUR_MAX, &state);
+		if (consumed == size_t(-1) || consumed == size_t(-2)) {
+			wc = (unsigned char)*s; consumed = 1; state = std::mbstate_t{};
+		} else if (consumed == 0) {
+			break;
+		}
+		out.push_back(wc);
+		s += consumed;
+	}
+	return out;
+}
+
+static void open_location_dialog() {
+	const char *patterns[] = {"*.im", "*.imt", "*.kfr", "*.kfp"};
+	const char *path = tinyfd_openFileDialog(
+		"Open Imagina location", "", 4, patterns,
+		"Imagina locations (*.im, *.imt, *.kfr, *.kfp)", 0);
+	if (!path) return;
+	std::wstring wpath = utf8_to_wide(path);
+	// Find extension offset: position of last '.' in path.
+	size_t dot = wpath.find_last_of(L'.');
+	size_t ext_off = (dot == std::wstring::npos) ? 0 : (dot + 1);
+	OpenFile(wpath.data(), ext_off);
+}
+
+static void save_image_dialog() {
+	const char *patterns[] = {"*.png"};
+	const char *path = tinyfd_saveFileDialog(
+		"Save image as PNG", "imagina.png", 1, patterns,
+		"PNG image (*.png)");
+	if (!path) return;
+	std::wstring wpath = utf8_to_wide(path);
+	SaveImage(wpath.data());
+}
+
+static void save_location_dialog() {
+	const char *patterns[] = {"*.im"};
+	const char *path = tinyfd_saveFileDialog(
+		"Save location", "imagina.im", 1, patterns,
+		"Imagina location (*.im)");
+	if (!path) return;
+	std::wstring wpath = utf8_to_wide(path);
+	SaveFile(wpath.data(), FileType::Imagina);
+}
+
+static bool g_is_fullscreen = false;
+static int g_windowed_x = 0, g_windowed_y = 0;
+static int g_windowed_w = 0, g_windowed_h = 0;
+
+static void toggle_fullscreen(GLFWwindow *w) {
+	if (!g_is_fullscreen) {
+		glfwGetWindowPos(w, &g_windowed_x, &g_windowed_y);
+		glfwGetWindowSize(w, &g_windowed_w, &g_windowed_h);
+		GLFWmonitor *mon = glfwGetPrimaryMonitor();
+		const GLFWvidmode *mode = glfwGetVideoMode(mon);
+		glfwSetWindowMonitor(w, mon, 0, 0, mode->width, mode->height, mode->refreshRate);
+		g_is_fullscreen = true;
+	} else {
+		glfwSetWindowMonitor(w, nullptr, g_windowed_x, g_windowed_y, g_windowed_w, g_windowed_h, 0);
+		g_is_fullscreen = false;
+	}
+}
 
 // Win32 globals normally defined in MainWindow.cpp. Other translation units
 // reach them by extern; we define them as null stubs on Linux.
@@ -95,7 +170,7 @@ static void scroll_cb(GLFWwindow *w, double /*xoffset*/, double yoffset) {
 	else if (yoffset < 0) FContext.ZoomOut(FractalX, FractalY);
 }
 
-static void key_cb(GLFWwindow * /*w*/, int key, int /*scancode*/, int action, int /*mods*/) {
+static void key_cb(GLFWwindow *w, int key, int /*scancode*/, int action, int mods) {
 	if (action != GLFW_PRESS && action != GLFW_REPEAT) {
 		if (action == GLFW_RELEASE && (key == GLFW_KEY_E || key == GLFW_KEY_R)) {
 			Global::ColorCyclingSpeed = 0.0;
@@ -103,7 +178,20 @@ static void key_cb(GLFWwindow * /*w*/, int key, int /*scancode*/, int action, in
 		}
 		return;
 	}
+	const bool ctrl  = (mods & GLFW_MOD_CONTROL) != 0;
+	const bool shift = (mods & GLFW_MOD_SHIFT)   != 0;
+	if (ctrl) {
+		switch (key) {
+			case GLFW_KEY_O: open_location_dialog(); return;
+			case GLFW_KEY_S:
+				if (shift) save_image_dialog();
+				else       save_location_dialog();
+				return;
+		}
+	}
 	switch (key) {
+		case GLFW_KEY_F11: toggle_fullscreen(w); return;
+		case GLFW_KEY_ESCAPE: if (g_is_fullscreen) toggle_fullscreen(w); return;
 		case GLFW_KEY_A: Global::ItDiv = std::max(8.0_sr, Global::ItDiv / 2); Global::Redraw = true; break;
 		case GLFW_KEY_S: Global::ItDiv = std::min(0x1p48_sr, Global::ItDiv * 2); Global::Redraw = true; break;
 		case GLFW_KEY_E: Global::ColorCyclingSpeed = -0.1; Global::Redraw = true; break;

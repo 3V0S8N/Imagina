@@ -25,18 +25,24 @@ modulo overlay text (currently disabled on Linux — Phase 3).
 - Math compute core: `Computation`, `Evaluator`, `HInfLAEvaluator`,
   `FractalContext`, `JitEvaluator`, `FeatureFinder`
 
-### What does NOT work yet on Linux
+### What now works (Phase 3.5 done)
 
-- **Interactive input**: mouse panning, scroll zoom, keyboard shortcuts.
-  Wired only as no-op callbacks in `main_linux.cpp` — needs the input
-  routing code from `MainWindow.cpp`'s `WindowProcess` to be ported.
-- **Menus**: 23 menu items live in `MainWindow.cpp`. Phase 3 → ImGui.
-- **Dialog boxes**: 8 Win32 dialogs (Location, Iteration Limit, etc.).
-  Phase 3 → ImGui modals.
-- **File-open dialog**: `MainWindow.cpp` uses `GetOpenFileNameW`.
-  Phase 3 → `nativefiledialog-extended` or `tinyfiledialogs`.
-- **In-image text overlay**: `DrawTextOverlay` is a no-op on Linux.
-  Phase 3 → FreeType.
+- **Mouse**: left-drag = pan, scroll = zoom in/out at cursor
+- **Keyboard shortcuts**: A/S = color density, D/F = iter limit, E/R = color cycling,
+  Ctrl+O = open location, Ctrl+S = save location, Ctrl+Shift+S = save image,
+  F11 = fullscreen toggle, Esc = leave fullscreen
+- **File-open / save dialogs**: vendored `tinyfiledialogs` in `third_party/`
+  (zlib license). Routes to zenity/kdialog/xmessage on Linux.
+- **In-image text overlay**: FreeType (DejaVu Sans Mono Bold) renders the
+  `Zoom 1.000e+0   Iter 1024` line in the same dark-backdrop style as
+  Windows GDI.
+
+### What still does NOT work on Linux
+
+- **Menus**: 23 menu items in `MainWindow.cpp`. Phase 4 → ImGui.
+- **Modal dialogs** for fine parameter input: 8 Win32 dialogs (Location,
+  Iteration Limit, etc.). Phase 4 → ImGui modals.
+  (Workaround: dial parameters via keyboard + click-zoom.)
 
 ### Linux-specific files & wrappers
 
@@ -71,16 +77,13 @@ modulo overlay text (currently disabled on Linux — Phase 3).
 - Path separator: `\` → `/` in `CheckFrameSequenceProgress`
 - Locale: `setlocale(LC_NUMERIC, "C")` so CLI decimal parsing works on de_DE
 
-## Phase 3 (next): Interactive GUI
+## Phase 4 (optional): Menus and modal dialogs via ImGui
 
-1. Port `WindowProcess` input handling from `MainWindow.cpp` to GLFW
-   callbacks (mouse, scroll, keyboard).
-2. Add Dear ImGui for menus + dialogs (replaces the 23 menu items and 8
-   dialogs).
-3. Add `tinyfiledialogs` (or `nfd-extended`) for file open/save dialogs.
-4. Implement `DrawTextOverlay` with FreeType for in-image zoom labels.
+Only thing the current Linux build lacks vs Windows: a menu bar and
+8 modal parameter-input dialogs. Workaround until then is keyboard
+shortcuts + Ctrl+O / Ctrl+S, which already cover the common workflow.
 
-Estimated 2-3 weeks of focused work for full GUI parity.
+Estimated 1-2 weeks of focused work.
 
 ## Phase 4 (polish)
 
