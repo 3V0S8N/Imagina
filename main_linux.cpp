@@ -23,6 +23,7 @@
 
 void OpenFile(wchar_t *FileName, size_t ExtensionOffset = 0);
 void SaveImage(wchar_t *FileName);
+void SaveRawPixelData(wchar_t *FileName);
 void SaveFile(wchar_t *FileName, FileType Type);
 
 // Forward declarations of globals defined below (so the menu-bar code can use them).
@@ -33,6 +34,7 @@ extern bool UsePalleteMipmaps;
 void SetFractalType(FractalTypeEnum Type);
 extern FractalTypeEnum CurrentFractalType;
 static void toggle_fullscreen(GLFWwindow *w);
+namespace Global { extern bool moved; extern bool ImageSizeFollowWindowSize; }
 
 static std::wstring utf8_to_wide(const char *s) {
 	if (!s) return {};
@@ -90,9 +92,35 @@ static int g_windowed_x = 0, g_windowed_y = 0;
 static int g_windowed_w = 0, g_windowed_h = 0;
 
 // === Dear ImGui menu bar ============================================
-static bool g_show_iter_dialog = false;
-static bool g_show_about       = false;
-static int  g_iter_dialog_buf  = 0;
+static bool g_show_iter_dialog       = false;
+static bool g_show_location_dialog   = false;
+static bool g_show_imagesize_dialog  = false;
+static bool g_show_transform_dialog  = false;
+static bool g_show_refsave_dialog    = false;
+static bool g_show_tasks_dialog      = false;
+static bool g_show_about             = false;
+
+static int      g_iter_dialog_buf       = 0;
+static char     g_loc_real_buf[128]     = {0};
+static char     g_loc_imag_buf[128]     = {0};
+static char     g_loc_size_buf[128]     = {0};
+static uint64_t g_loc_iter_buf          = 0;
+static int      g_imgsize_w_buf         = 0;
+static int      g_imgsize_h_buf         = 0;
+static float    g_transform_mat[4]      = {1, 0, 0, 1};
+
+static void save_raw_pixel_dialog() {
+	const char *patterns[] = {"*"};
+	const char *path = tinyfd_saveFileDialog("Save raw pixel data",
+		"imagina.raw", 1, patterns, "Raw pixel data");
+	if (!path) return;
+	if (!FContext.pixelManager.Completed()) {
+		std::fprintf(stderr, "Imagina: please wait for computations to finish first.\n");
+		return;
+	}
+	std::wstring wpath = utf8_to_wide(path);
+	SaveRawPixelData(wpath.data());
+}
 
 static void reset_location() {
 	FContext.CurrentLocation = { 0.0, 0.0, 2.0 };
@@ -106,14 +134,65 @@ static void set_fractal_via_menu(FractalTypeEnum t) {
 	FContext.InvalidateAll();
 }
 
+static std::string mpf_to_decimal_string(const mpf_class &v) {
+	// GMP returns ("digits", expo) where decimal point sits after `expo` digits.
+	mp_exp_t expo = 0;
+	std::string digits = v.get_str(expo, 10, 40);
+	bool neg = !digits.empty() && digits[0] == '-';
+	if (neg) digits.erase(0, 1);
+	if (digits.empty()) return neg ? "-0" : "0";
+	// Insert decimal point at position expo.
+	std::string out;
+	if (expo <= 0) {
+		out = "0." + std::string(-expo, '0') + digits;
+	} else if ((size_t)expo >= digits.size()) {
+		out = digits + std::string(expo - digits.size(), '0');
+	} else {
+		out = digits.substr(0, expo) + "." + digits.substr(expo);
+	}
+	if (neg) out = "-" + out;
+	return out;
+}
+
+static void open_location_dialog_state() {
+	g_show_location_dialog = true;
+	// Pre-fill with current values.
+	std::string re = mpf_to_decimal_string(FContext.CenterCoordinate.X);
+	std::string im = mpf_to_decimal_string(FContext.CenterCoordinate.Y);
+	std::snprintf(g_loc_real_buf, sizeof(g_loc_real_buf), "%s", re.c_str());
+	std::snprintf(g_loc_imag_buf, sizeof(g_loc_imag_buf), "%s", im.c_str());
+	double mant = double(FContext.CurrentLocation.HalfH.Mantissa);
+	const double LOG10_2 = 0.30102999566398119521;
+	double log10_size = double(FContext.CurrentLocation.HalfH.Exponent) * LOG10_2 + log10(std::abs(mant));
+	std::snprintf(g_loc_size_buf, sizeof(g_loc_size_buf), "1e%.3f", log10_size);
+	g_loc_iter_buf = Global::ItLim;
+}
+
+static void open_imagesize_dialog_state() {
+	g_show_imagesize_dialog = true;
+	g_imgsize_w_buf = (int)FContext.ImageWidth;
+	g_imgsize_h_buf = (int)FContext.ImageHeight;
+}
+
+static void open_transform_dialog_state() {
+	g_show_transform_dialog = true;
+	g_transform_mat[0] = (float)Global::TransformMatrix[0][0];
+	g_transform_mat[1] = (float)Global::TransformMatrix[0][1];
+	g_transform_mat[2] = (float)Global::TransformMatrix[1][0];
+	g_transform_mat[3] = (float)Global::TransformMatrix[1][1];
+}
+
 static void draw_menu_bar() {
 	if (!ImGui::BeginMainMenuBar()) return;
 	if (ImGui::BeginMenu("File")) {
-		if (ImGui::MenuItem("Open location...",  "Ctrl+O"))       open_location_dialog();
-		if (ImGui::MenuItem("Save location...",  "Ctrl+S"))       save_location_dialog();
-		if (ImGui::MenuItem("Save image (PNG)...", "Ctrl+Shift+S")) save_image_dialog();
+		if (ImGui::MenuItem("Open location...",        "Ctrl+O"))       open_location_dialog();
+		if (ImGui::MenuItem("Save location...",        "Ctrl+S"))       save_location_dialog();
+		if (ImGui::MenuItem("Save image (PNG)...",     "Ctrl+Shift+S")) save_image_dialog();
+		if (ImGui::MenuItem("Save raw pixel data..."))                  save_raw_pixel_dialog();
 		ImGui::Separator();
-		if (ImGui::MenuItem("Quit"))             glfwSetWindowShouldClose(g_glfw_window, GLFW_TRUE);
+		if (ImGui::MenuItem("Reference saving..."))                     g_show_refsave_dialog = true;
+		ImGui::Separator();
+		if (ImGui::MenuItem("Quit"))                                    glfwSetWindowShouldClose(g_glfw_window, GLFW_TRUE);
 		ImGui::EndMenu();
 	}
 	if (ImGui::BeginMenu("Fractal")) {
@@ -125,28 +204,70 @@ static void draw_menu_bar() {
 			ImGui::EndMenu();
 		}
 		ImGui::Separator();
-		if (ImGui::MenuItem("Distance estimation", nullptr, UseDE)) { UseDE = !UseDE; FContext.ParameterChanged = true; }
+		const bool de_enabled = UseLinearApproximation;
+		const bool hq_enabled = (CurrentFractalType == FractalTypeEnum::Mandelbrot) && UseLinearApproximation;
+		if (ImGui::MenuItem("Distance estimation", nullptr, UseDE, de_enabled)) { UseDE = !UseDE; FContext.ParameterChanged = true; }
+		if (ImGui::MenuItem("High quality (Mandelbrot+LA)", nullptr, Global::HighQuality, hq_enabled)) {
+			Global::HighQuality = !Global::HighQuality;
+			FContext.InvalidatePixel();
+		}
+		ImGui::Separator();
+		if (ImGui::MenuItem("Location..."))                    open_location_dialog_state();
+		if (ImGui::MenuItem("Iteration limit..."))             { g_show_iter_dialog = true; g_iter_dialog_buf = (int)Global::ItLim; }
+		if (ImGui::MenuItem("Transformation..."))              open_transform_dialog_state();
+		ImGui::Separator();
+		if (ImGui::MenuItem("Increase color density",        "A")) { Global::ItDiv = std::max(8.0_sr,    Global::ItDiv / 2); Global::Redraw = true; }
+		if (ImGui::MenuItem("Decrease color density",        "S")) { Global::ItDiv = std::min(0x1p48_sr, Global::ItDiv * 2); Global::Redraw = true; }
+		if (ImGui::MenuItem("Increase iteration limit",      "D")) { Global::ItLim = std::min(UINT64_C(1) << 48, Global::ItLim * 2); FContext.ParameterChanged = true; FContext.RecomputeReference = true; }
+		if (ImGui::MenuItem("Decrease iteration limit",      "F")) { Global::ItLim = std::max(UINT64_C(8),       Global::ItLim / 2); FContext.ParameterChanged = true; }
 		ImGui::Separator();
 		if (ImGui::MenuItem("Reset location"))                 reset_location();
-		if (ImGui::MenuItem("Iteration limit..."))             { g_show_iter_dialog = true; g_iter_dialog_buf = (int)Global::ItLim; }
-		ImGui::Separator();
-		if (ImGui::MenuItem("Increase color density (A)"))     { Global::ItDiv = std::max(8.0_sr,    Global::ItDiv / 2); Global::Redraw = true; }
-		if (ImGui::MenuItem("Decrease color density (S)"))     { Global::ItDiv = std::min(0x1p48_sr, Global::ItDiv * 2); Global::Redraw = true; }
-		if (ImGui::MenuItem("Increase iteration limit (D)"))   { Global::ItLim = std::min(UINT64_C(1) << 48, Global::ItLim * 2); FContext.ParameterChanged = true; FContext.RecomputeReference = true; }
-		if (ImGui::MenuItem("Decrease iteration limit (F)"))   { Global::ItLim = std::max(UINT64_C(8),       Global::ItLim / 2); FContext.ParameterChanged = true; }
 		ImGui::EndMenu();
 	}
 	if (ImGui::BeginMenu("Computation")) {
-		if (ImGui::MenuItem("Linear approximation", nullptr, UseLinearApproximation)) { UseLinearApproximation = !UseLinearApproximation; FContext.RecomputeReference = true; }
-		if (ImGui::MenuItem("Lock reference",       nullptr, FContext.LockReference)) { FContext.LockReference   = !FContext.LockReference; }
-		ImGui::Separator();
-		if (ImGui::MenuItem("Recompute reference")) { FContext.RecomputeReference = true; }
-		if (ImGui::MenuItem("Recompute all"))       { FContext.InvalidateAll(); }
+		if (ImGui::BeginMenu("Algorithm", CurrentFractalType == FractalTypeEnum::Mandelbrot)) {
+			if (ImGui::MenuItem("Perturbation",         nullptr, !UseLinearApproximation)) {
+				if (UseLinearApproximation) {
+					UseLinearApproximation = false;
+					FContext.ChangeFractalType(CurrentFractalType, false);
+				}
+			}
+			if (ImGui::MenuItem("Linear approximation", nullptr, UseLinearApproximation)) {
+				if (!UseLinearApproximation) {
+					UseLinearApproximation = true;
+					FContext.ChangeFractalType(CurrentFractalType, true);
+				}
+			}
+			ImGui::EndMenu();
+		}
+		if (ImGui::BeginMenu("Recompute")) {
+			if (ImGui::MenuItem("Reference")) FContext.RecomputeReference = true;
+			if (ImGui::MenuItem("Pixel"))     FContext.InvalidatePixel();
+			if (ImGui::MenuItem("All"))       FContext.InvalidateAll();
+			ImGui::EndMenu();
+		}
+		if (ImGui::MenuItem("Lock reference", nullptr, FContext.LockReference)) {
+			FContext.LockReference = !FContext.LockReference;
+		}
+		if (ImGui::MenuItem("Tasks..."))                       g_show_tasks_dialog = true;
 		ImGui::EndMenu();
 	}
 	if (ImGui::BeginMenu("Image")) {
+		if (ImGui::MenuItem("Image size..."))                  open_imagesize_dialog_state();
+		if (ImGui::MenuItem("Bilinear filter", nullptr, Global::UseBilinearFilter)) {
+			Global::UseBilinearFilter = !Global::UseBilinearFilter;
+			Global::Redraw = true;
+		}
+		if (ImGui::MenuItem("Pre-modulo",      nullptr, Global::PreModulo)) {
+			Global::PreModulo = !Global::PreModulo;
+			FContext.InvalidatePixel();
+		}
+		if (ImGui::MenuItem("Palette mipmaps", nullptr, UsePalleteMipmaps)) {
+			UsePalleteMipmaps = !UsePalleteMipmaps;
+			Global::Redraw = true;
+		}
+		ImGui::Separator();
 		if (ImGui::MenuItem("Toggle fullscreen", "F11")) toggle_fullscreen(g_glfw_window);
-		if (ImGui::MenuItem("Palette mipmaps", nullptr, UsePalleteMipmaps)) { UsePalleteMipmaps = !UsePalleteMipmaps; Global::Redraw = true; }
 		ImGui::EndMenu();
 	}
 	if (ImGui::BeginMenu("Help")) {
@@ -186,6 +307,135 @@ static void draw_about() {
 			"Original Windows code by Zhuoran. Linux port via GLFW + ImGui + FreeType + GMP.");
 		ImGui::Separator();
 		if (ImGui::Button("Close")) g_show_about = false;
+	}
+	ImGui::End();
+}
+
+static void draw_location_dialog() {
+	if (!g_show_location_dialog) return;
+	ImGui::SetNextWindowSize(ImVec2(500, 200), ImGuiCond_Once);
+	if (ImGui::Begin("Location", &g_show_location_dialog, ImGuiWindowFlags_NoCollapse)) {
+		ImGui::InputText("Real",       g_loc_real_buf, sizeof(g_loc_real_buf));
+		ImGui::InputText("Imaginary",  g_loc_imag_buf, sizeof(g_loc_imag_buf));
+		ImGui::InputText("Size (e.g. 1e-12)", g_loc_size_buf, sizeof(g_loc_size_buf));
+		uint64_t iter = g_loc_iter_buf;
+		if (ImGui::InputScalar("Iterations", ImGuiDataType_U64, &iter)) {
+			if (iter < 8) iter = 8;
+			g_loc_iter_buf = iter;
+		}
+		ImGui::Separator();
+		if (ImGui::Button("Apply")) {
+			try {
+				HRReal HalfH = HRReal(mpf_class(g_loc_size_buf, 52, -16));
+				if (HalfH > 16.0_hr) HalfH = 16.0_hr;
+				uint64_t Precision = -std::min<int64_t>(0, HalfH.Exponent) + 64;
+				Coordinate NewCoord{ mpf_class(g_loc_real_buf, Precision, 16),
+				                     mpf_class(g_loc_imag_buf, Precision, -16) };
+				FContext.SetLocation(NewCoord, Precision, HalfH);
+				Global::ItLim = std::clamp(g_loc_iter_buf, UINT64_C(8), UINT64_C(1) << 48);
+				FContext.ParameterChanged = true;
+				FContext.RecomputeReference = true;
+			} catch (...) {
+				std::fprintf(stderr, "Imagina: invalid location values\n");
+			}
+			g_show_location_dialog = false;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) g_show_location_dialog = false;
+	}
+	ImGui::End();
+}
+
+static void draw_imagesize_dialog() {
+	if (!g_show_imagesize_dialog) return;
+	ImGui::SetNextWindowSize(ImVec2(320, 130), ImGuiCond_Once);
+	if (ImGui::Begin("Image size", &g_show_imagesize_dialog, ImGuiWindowFlags_NoCollapse)) {
+		ImGui::InputInt("Width",  &g_imgsize_w_buf, 64, 256);
+		ImGui::InputInt("Height", &g_imgsize_h_buf, 64, 256);
+		g_imgsize_w_buf = std::clamp(g_imgsize_w_buf, 16, 65536);
+		g_imgsize_h_buf = std::clamp(g_imgsize_h_buf, 16, 65536);
+		if (ImGui::Button("Apply")) {
+			FContext.ImageWidth  = (size_t)g_imgsize_w_buf;
+			FContext.ImageHeight = (size_t)g_imgsize_h_buf;
+			FContext.pixelManager.SetResolution(g_imgsize_w_buf, g_imgsize_h_buf);
+			FContext.ParameterChanged = true;
+			FContext.RecomputeReference = true;
+			Global::ImageSizeFollowWindowSize = false;
+			g_show_imagesize_dialog = false;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) g_show_imagesize_dialog = false;
+	}
+	ImGui::End();
+}
+
+static void draw_transform_dialog() {
+	if (!g_show_transform_dialog) return;
+	ImGui::SetNextWindowSize(ImVec2(340, 200), ImGuiCond_Once);
+	if (ImGui::Begin("Transformation", &g_show_transform_dialog, ImGuiWindowFlags_NoCollapse)) {
+		ImGui::Text("2x2 transform matrix:");
+		ImGui::InputFloat2("Row 0", &g_transform_mat[0]);
+		ImGui::InputFloat2("Row 1", &g_transform_mat[2]);
+		if (ImGui::Button("Identity")) {
+			g_transform_mat[0] = 1; g_transform_mat[1] = 0;
+			g_transform_mat[2] = 0; g_transform_mat[3] = 1;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Apply")) {
+			Global::TransformMatrix[0][0] = g_transform_mat[0];
+			Global::TransformMatrix[0][1] = g_transform_mat[1];
+			Global::TransformMatrix[1][0] = g_transform_mat[2];
+			Global::TransformMatrix[1][1] = g_transform_mat[3];
+			Global::InvTransformMatrix = glm::inverse(Global::TransformMatrix);
+			Global::Redraw = true;
+			g_show_transform_dialog = false;
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) g_show_transform_dialog = false;
+	}
+	ImGui::End();
+}
+
+static void draw_refsave_dialog() {
+	if (!g_show_refsave_dialog) return;
+	ImGui::SetNextWindowSize(ImVec2(360, 160), ImGuiCond_Once);
+	if (ImGui::Begin("Reference saving", &g_show_refsave_dialog, ImGuiWindowFlags_NoCollapse)) {
+		ImGui::Checkbox("Save reference orbit with location", &Global::SaveReference);
+		ImGui::BeginDisabled(!Global::SaveReference);
+		ImGui::SliderInt("Quality", &Global::ReferenceQuality, 32, 48);
+		ImGui::EndDisabled();
+		if (ImGui::Button("Close")) g_show_refsave_dialog = false;
+	}
+	ImGui::End();
+}
+
+static void draw_tasks_dialog() {
+	if (!g_show_tasks_dialog) return;
+	ImGui::SetNextWindowSize(ImVec2(420, 220), ImGuiCond_Once);
+	if (ImGui::Begin("Tasks", &g_show_tasks_dialog, ImGuiWindowFlags_NoCollapse)) {
+		ImGui::Text("Pixel manager: %s",
+			FContext.pixelManager.Completed() ? "idle" : "computing");
+		ImGui::Text("Reference task running: %s",
+			FContext.ReferenceTaskContext ? "yes" : "no");
+		ImGui::Text("Parameter changed: %s",
+			FContext.ParameterChanged ? "yes" : "no");
+		ImGui::Text("Recompute reference: %s",
+			FContext.RecomputeReference ? "yes" : "no");
+		ImGui::Text("Compute pixel: %s",
+			FContext.ComputePixel ? "yes" : "no");
+		ImGui::Text("Zooming: %s",
+			FContext.Zooming ? "yes" : "no");
+
+		SRReal num, den;
+		if (FContext.pixelManager.GetProgress(num, den)) {
+			float frac = (den > 0) ? float(num / den) : 0.f;
+			ImGui::ProgressBar(frac);
+		}
+
+		ImGui::Separator();
+		if (ImGui::Button("Abort current work")) FContext.pixelManager.Abort();
+		ImGui::SameLine();
+		if (ImGui::Button("Close")) g_show_tasks_dialog = false;
 	}
 	ImGui::End();
 }
@@ -433,6 +683,11 @@ int main(int argc, char **argv) {
 		ImGui::NewFrame();
 		draw_menu_bar();
 		draw_iter_dialog();
+		draw_location_dialog();
+		draw_imagesize_dialog();
+		draw_transform_dialog();
+		draw_refsave_dialog();
+		draw_tasks_dialog();
 		draw_about();
 		ImGui::Render();
 		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
