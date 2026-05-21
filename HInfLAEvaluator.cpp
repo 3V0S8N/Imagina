@@ -5,6 +5,10 @@
 #include <math.h>
 #include <random>
 
+#ifdef IMAGINA_LINUX
+#include <sys/sysinfo.h>
+#endif
+
 #ifndef M_E
 #define M_E 2.71828182845905
 #endif
@@ -33,11 +37,22 @@ HInfLAEvaluator::JuliaPixel HInfLAEvaluator::JuliaMipmaps::Sample(HRComplex z, H
 	return Pixel;
 }
 HInfLAEvaluator::HInfLAEvaluator() {
+#ifdef IMAGINA_LINUX
+	struct sysinfo si{};
+	uint64_t totalPhys = 0;
+	if (sysinfo(&si) == 0) {
+		totalPhys = uint64_t(si.totalram) * si.mem_unit;
+	}
+	if (totalPhys == 0) totalPhys = uint64_t(8) << 30;
+	RefReserveSize = totalPhys & ~(CommitSize - 1);
+	LAReserveSize = (totalPhys / 2) & ~(CommitSize - 1);
+#else
 	MEMORYSTATUSEX statex;
 	statex.dwLength = sizeof(statex);
 	GlobalMemoryStatusEx(&statex);
 	RefReserveSize = (statex.ullTotalPhys) & ~(CommitSize - 1);
 	LAReserveSize = (statex.ullTotalPhys / 2) & ~(CommitSize - 1);
+#endif
 	featureFinder = new FeatureFinder;
 }
 HInfLAEvaluator::~HInfLAEvaluator() {
@@ -149,7 +164,12 @@ template<typename real, typename orbitreal> void HInfLAEvaluator::SaveCompressed
 	WayPoints.Serialize(stream);
 	Rebases.Serialize(stream);
 }
-template<typename real>__declspec(noinline) void HInfLAEvaluator::LoadCompressedOrbit(std::istream &stream, LAReference<real> &Ref) {
+#ifdef _WIN32
+#define IM_NOINLINE __declspec(noinline)
+#else
+#define IM_NOINLINE __attribute__((noinline))
+#endif
+template<typename real>IM_NOINLINE void HInfLAEvaluator::LoadCompressedOrbit(std::istream &stream, LAReference<real> &Ref) {
 	using WayPoint = WayPoint<real>;
 	using complex = std::complex<real>;
 

@@ -2,6 +2,9 @@
 #define _INCLUDES_H_
 
 #include "Configuration.h"
+#ifdef IMAGINA_LINUX
+#include "LinuxCompat.h"
+#endif
 
 #ifdef _WIN32
 #define NOMINMAX

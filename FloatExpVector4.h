@@ -17,7 +17,25 @@ template <> struct Vector4Selector<FExpDouble> { using type = DExpVec4; };
 inline DExpVec4 operator+(DExpVec4 x, const DExpVec4 &y) noexcept;
 inline DExpVec4 operator-(DExpVec4 x, const DExpVec4 &y) noexcept;
 
+#ifdef IMAGINA_LINUX
+struct DExpVec4NormalizedPositiveView {
+	dvec4 Mantissa;
+	i64vec4 Exponent;
+	mask64x4 operator> (const struct DExpVec4 &x) const;
+	mask64x4 operator>=(const struct DExpVec4 &x) const;
+	mask64x4 operator< (const struct DExpVec4 &x) const;
+	mask64x4 operator<=(const struct DExpVec4 &x) const;
+};
+#endif
+
 struct DExpVec4 {
+#ifdef IMAGINA_LINUX
+	dvec4 Mantissa;
+	i64vec4 Exponent;
+	DExpVec4NormalizedPositiveView &_get_NormalizedPositive() { return reinterpret_cast<DExpVec4NormalizedPositiveView &>(*this); }
+	const DExpVec4NormalizedPositiveView &_get_NormalizedPositive() const { return reinterpret_cast<const DExpVec4NormalizedPositiveView &>(*this); }
+	#define AssumeNormalizedPositive _get_NormalizedPositive()
+#else
 	union {
 		struct {
 			dvec4 Mantissa;
@@ -46,6 +64,7 @@ struct DExpVec4 {
 			mask64x4 operator<=(const DExpVec4 &x) const { return (Exponent < x.Exponent) || ((Exponent == x.Exponent) && (Mantissa <= x.Mantissa)); }
 		} AssumeNormalizedPositive;
 	};
+#endif
 	
 	mask64x4 operator==(const DExpVec4 &x) const { return (Exponent == x.Exponent) && (Mantissa == x.Mantissa); }
 	mask64x4 operator!=(const DExpVec4 &x) const { return (Exponent != x.Exponent) || (Mantissa != x.Mantissa); }
@@ -259,3 +278,10 @@ inline DExpVec4 copysign(const DExpVec4 &mag, const DExpVec4 &sgn) {
 	result.Mantissa = copysign(mag.Mantissa, sgn.Mantissa);
 	return result;
 }
+
+#ifdef IMAGINA_LINUX
+inline mask64x4 DExpVec4NormalizedPositiveView::operator> (const DExpVec4 &x) const { return (Exponent > x.Exponent) || ((Exponent == x.Exponent) && (Mantissa >  x.Mantissa)); }
+inline mask64x4 DExpVec4NormalizedPositiveView::operator>=(const DExpVec4 &x) const { return (Exponent > x.Exponent) || ((Exponent == x.Exponent) && (Mantissa >= x.Mantissa)); }
+inline mask64x4 DExpVec4NormalizedPositiveView::operator< (const DExpVec4 &x) const { return (Exponent < x.Exponent) || ((Exponent == x.Exponent) && (Mantissa <  x.Mantissa)); }
+inline mask64x4 DExpVec4NormalizedPositiveView::operator<=(const DExpVec4 &x) const { return (Exponent < x.Exponent) || ((Exponent == x.Exponent) && (Mantissa <= x.Mantissa)); }
+#endif

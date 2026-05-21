@@ -109,7 +109,7 @@ inline HPReal operator""_hp(long double x) {
 }
 
 inline HPReal operator""_hp(unsigned long long x) {
-	return HPReal(x);
+	return HPReal((unsigned long)x);
 }
 
 inline double ToReal(const mpf_class& n) {

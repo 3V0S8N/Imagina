@@ -19,6 +19,17 @@ if(IMAGINA_LINUX_PORT)
 	list(FILTER SourceFiles EXCLUDE REGEX ".*MainWindow\\.cpp$")
 	list(FILTER SourceFiles EXCLUDE REGEX ".*/main\\.cpp$")
 	list(FILTER SourceFiles EXCLUDE REGEX "^main\\.cpp$")
+	# Heavily Win32-coupled files. Phase 1: skip. Re-introduced with platform abstraction in later phases.
+	#   CLI.cpp: HWND, MessageBox, PostQuitMessage
+	#   Overlay.cpp: GDI text rendering (-> FreeType later)
+	#   File.cpp: wchar_t fopen/ifstream + MessageBoxW dialogs
+	#   GLUtils.cpp: wglGetProcAddress (uses glXGetProcAddress on Linux)
+	#   Render.cpp: SwapBuffers + heavy GL state setup
+	#   PixelManager.cpp: GL texture pipeline
+	foreach(skip CLI Overlay File GLUtils Render PixelManager)
+		list(FILTER SourceFiles EXCLUDE REGEX ".*/${skip}\\.cpp$")
+		list(FILTER SourceFiles EXCLUDE REGEX "^${skip}\\.cpp$")
+	endforeach()
 endif()
 
 if(ENABLE_CUSTOM_FORMULA)
@@ -40,6 +51,12 @@ target_compile_definitions(Imagina PRIVATE UNICODE)
 
 if(IMAGINA_LINUX_PORT)
 	target_compile_definitions(Imagina PRIVATE IMAGINA_LINUX)
+	# Imagina was written against MSVC. GCC compat flags:
+	target_compile_options(Imagina PRIVATE -fms-extensions -fpermissive -Wno-permissive)
+	# -fdeclspec only exists on clang, not gcc:
+	if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+		target_compile_options(Imagina PRIVATE -fdeclspec)
+	endif()
 
 	find_package(PkgConfig REQUIRED)
 	pkg_check_modules(GLFW REQUIRED IMPORTED_TARGET glfw3)

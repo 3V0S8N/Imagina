@@ -91,12 +91,24 @@ Task *SimpleEvaluator::CreateEvaluationTask(const EvaluationParameters &paramete
 	return new StandardEvaluationTask(this, parameters, rasterizer, reference);
 }
 
+#ifdef IMAGINA_LINUX
+#include <sys/sysinfo.h>
+#endif
+
 template<FractalTypeEnum FractalType>
 PerturbationEvaluator<FractalType>::PerturbationEvaluator() {
+#ifdef IMAGINA_LINUX
+	struct sysinfo si{};
+	uint64_t totalPhys = 0;
+	if (sysinfo(&si) == 0) totalPhys = uint64_t(si.totalram) * si.mem_unit;
+	if (totalPhys == 0) totalPhys = uint64_t(8) << 30;
+	ReserveSize = totalPhys & ~(CommitSize - 1);
+#else
 	MEMORYSTATUSEX statex;
 	statex.dwLength = sizeof(statex);
 	GlobalMemoryStatusEx(&statex);
 	ReserveSize = (statex.ullTotalPhys) & ~(CommitSize - 1);
+#endif
 }
 
 template<FractalTypeEnum FractalType>
@@ -273,10 +285,18 @@ template class PerturbationEvaluator<FractalTypeEnum::BurningShip>;
 template class PerturbationEvaluator<FractalTypeEnum::Tricorn>;
 
 NovaEvaluator::NovaEvaluator() {
+#ifdef IMAGINA_LINUX
+	struct sysinfo si{};
+	uint64_t totalPhys = 0;
+	if (sysinfo(&si) == 0) totalPhys = uint64_t(si.totalram) * si.mem_unit;
+	if (totalPhys == 0) totalPhys = uint64_t(8) << 30;
+	ReserveSize = totalPhys & ~(CommitSize - 1);
+#else
 	MEMORYSTATUSEX statex;
 	statex.dwLength = sizeof(statex);
 	GlobalMemoryStatusEx(&statex);
 	ReserveSize = (statex.ullTotalPhys) & ~(CommitSize - 1);
+#endif
 }
 
 Reference *NovaEvaluator::GenerateReference(const EvaluationParameters &parameters) {
@@ -355,7 +375,12 @@ void NovaEvaluator::Evaluate(const EvaluationParameters &parameters, PixelManage
 }
 
 template<typename T>
-__forceinline std::complex<T> operator^(std::complex<T> a, size_t b) {
+#ifdef IMAGINA_LINUX
+inline
+#else
+__forceinline
+#endif
+std::complex<T> operator^(std::complex<T> a, size_t b) {
 	switch (b) {
 		case 1: return a;
 		case 2: return a * a;

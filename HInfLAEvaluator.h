@@ -145,14 +145,16 @@ struct LAInfo {
 		return Result;
 	}
 
-	template<typename real>
+	// Partial specialization is legal inside a class template; explicit
+	// specialization (template<>) is not. Use a dummy parameter to convert.
+	template<typename real, int = 0>
 	struct Temp {
 		bool unusable;
 		std::complex<real> newdz;
 	};
 
-	template<>
-	struct Temp<vreal> {
+	template<int dummy>
+	struct Temp<vreal, dummy> {
 		mask64x4 unusable;
 		vcomplex newdz;
 	};

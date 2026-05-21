@@ -151,6 +151,7 @@ void Computation::WorkerFunction() {
 
 		ContextLock.unlock();
 
+#ifdef _WIN32
 		DWORD_PTR originalAffinityMask = 0;
 		if (cooperativeTask) { // PLATFORM DEPENDENT
 			if (cooperativeTask->ThreadCount <= HardwareConcurrency / 2) {
@@ -161,6 +162,7 @@ void Computation::WorkerFunction() {
 				SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);
 			}
 		}
+#endif
 
 		if (parallelTask) {
 			parallelTask->Execute(ThreadID);
@@ -168,12 +170,18 @@ void Computation::WorkerFunction() {
 			task->Execute();
 		}
 
+#ifdef _WIN32
 		if (cooperativeTask) {
 			if (originalAffinityMask) {
 				SetThreadAffinityMask(GetCurrentThread(), originalAffinityMask);
 			}
 			SetWorkerPriority();
 		}
+#else
+		if (cooperativeTask) {
+			SetWorkerPriority();
+		}
+#endif
 
 		ContextLock.lock();
 
