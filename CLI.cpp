@@ -248,6 +248,10 @@ void ApplyCLISettings() {
 		FContext.Zooming = false;
 		FContext.ChangeLocation(NewLoc);
 	}
+
+	if (g_cli.render_zoom || g_cli.auto_render) {
+		AutoBumpItLim();
+	}
 }
 
 // Is renderer fully settled?
@@ -259,6 +263,24 @@ static bool IsRenderFullySettled() {
 	if (FContext.ComputePixel) return false;
 	if (FContext.Zooming) return false;
 	return true;
+}
+
+// Auto-grow iteration limit with zoom depth.
+static void AutoBumpItLim() {
+	const auto &HalfH = FContext.CurrentLocation.HalfH;
+	double mant = double(HalfH.Mantissa);
+	if (mant <= 0.0 || !std::isfinite(mant)) return;
+	const double LOG10_2 = 0.30102999566398119521;
+	double log10_zoom = double(1 - HalfH.Exponent) * LOG10_2 - log10(mant);
+	if (log10_zoom < 0) log10_zoom = 0;
+	size_t target = (size_t)(2048.0 * log10_zoom + 1024.0);
+	size_t floor_iter = (g_cli.iterations > 0) ? (size_t)g_cli.iterations : 1024;
+	if (target < floor_iter) target = floor_iter;
+	target = std::min<size_t>(target, (size_t)1 << 48);
+	if (Global::ItLim < target) {
+		Global::ItLim = target;
+		FContext.ParameterChanged = true;
+	}
 }
 
 bool CheckFrameSequenceProgress() {
@@ -287,6 +309,7 @@ bool CheckFrameSequenceProgress() {
 	NewLoc.HalfH *= HRReal(g_cli.zoom_step);
 	FContext.Zooming = false;
 	FContext.ChangeLocation(NewLoc);
+	AutoBumpItLim();
 
 	return false;
 }
