@@ -200,6 +200,9 @@ void ParseCLI(int argc, wchar_t **argv) {
 	}
 }
 
+// Forward declaration so ApplyCLISettings can call it.
+static void AutoBumpItLim();
+
 void ApplyCLISettings() {
 	// Load location file.
 	if (!g_cli.location_file.empty()) {
@@ -280,6 +283,7 @@ static void AutoBumpItLim() {
 	if (Global::ItLim < target) {
 		Global::ItLim = target;
 		FContext.ParameterChanged = true;
+		FContext.RecomputeReference = true;
 	}
 }
 
