@@ -5,6 +5,7 @@
 #include <memory>
 #include <fenv.h>
 #include <gmp-impl.h>
+#include "CLI.h"
 
 void OpenFile(wchar_t *FileName, size_t ExtensionOffset = 0);
 
@@ -25,11 +26,19 @@ int WINAPI wWinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/, LPWSTR
 
 	int argc;
 	LPWSTR *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-	if (argc == 2) {
-		OpenFile(argv[1]);
+	ParseCLI(argc, argv);
+	LocalFree(argv);
+
+	if (!g_cli.valid) {
+		if (g_cli.error == L"help") {
+			ShowHelp();
+		} else {
+			MessageBoxW(nullptr, g_cli.error.c_str(), L"Imagina: argument error", MB_OK | MB_ICONERROR);
+		}
+		return 0;
 	}
 
-	LocalFree(argv);
+	ApplyCLISettings();
 
 	while (true) {
 		MSG Message;
@@ -98,5 +107,12 @@ int WINAPI wWinMain(HINSTANCE /*hInstance*/, HINSTANCE /*hPrevInstance*/, LPWSTR
 		} else UseGetMessage = false;
 
 		EndRender();
+
+		// Update title.
+		UpdateWindowTitle();
+
+		// Headless save+exit hooks.
+		CheckAutoRenderComplete();
+		CheckFrameSequenceProgress();
 	}
 }

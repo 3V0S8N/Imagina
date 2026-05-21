@@ -1,5 +1,6 @@
 #include "Includes.h"
 #include "File.h"
+#include "Overlay.h"
 
 #include <fstream>
 #include <png.h>
@@ -522,6 +523,11 @@ void SaveImage(wchar_t *FileName) {
 			pixData[i * 4 + 2] = round(rgba.B * 255.0);
 			pixData[i * 4 + 3] = round(rgba.A * 255.0);
 		}
+	}
+
+	// Optional overlay.
+	if (!g_overlay_text.empty()) {
+		DrawTextOverlay(pixData, width, height, g_overlay_text.c_str(), 16, 16);
 	}
 
 	png_write_image(png, row_pointers);
