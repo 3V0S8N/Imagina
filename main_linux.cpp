@@ -103,6 +103,84 @@ static bool g_show_formula_dialog    = false;
 static bool g_show_feature_dialog    = false;
 static char g_formula_buf[256]       = {0};
 
+// Feature-dialog state for precise-locate + zoom.
+enum class ZoomTargetType { Height = 0, HalfHeight, Magnification, Depth, FeatureDepth };
+static int       g_zoom_target_idx        = (int)ZoomTargetType::FeatureDepth;
+static bool      g_zoom_relative          = false;
+static char      g_zoom_target_value[64]  = "1.0";
+static HRReal    g_feature_radius;
+static Evaluator::FeatureFinder::PreciseLocatingTask *g_locate_task = nullptr;
+static ExecutionContext *g_locate_ctx    = nullptr;
+static HRReal    g_locate_target_radius;
+static size_t    g_locate_precision      = 0;
+static IntIter   g_locate_new_itlim      = 0;
+static bool      g_locate_cancelling     = false;
+static char      g_locate_progress_text[1024] = "Starting...";
+
+static HRReal calculate_zoom_target_radius() {
+	std::string val = g_zoom_target_value;
+	if (g_zoom_target_idx == (int)ZoomTargetType::FeatureDepth) {
+		double Depth = std::stod(val);
+		double FeatureDepth = log2(g_feature_radius);
+		if (g_zoom_relative) {
+			double CurrentDepth = log2(FContext.CurrentLocation.HalfH);
+			FeatureDepth -= CurrentDepth;
+			Depth = Depth * FeatureDepth + CurrentDepth;
+		} else {
+			Depth *= FeatureDepth;
+		}
+		return pow2(Depth);
+	}
+	double parsed = std::stod(val);
+	HRReal r;
+	switch ((ZoomTargetType)g_zoom_target_idx) {
+		case ZoomTargetType::Height:        r = HRReal(parsed) / HRReal(2.0); break;
+		case ZoomTargetType::HalfHeight:    r = HRReal(parsed); break;
+		case ZoomTargetType::Magnification: r = HRReal(1.0) / HRReal(parsed); break;
+		case ZoomTargetType::Depth:         r = pow2(-parsed); break;
+		default: r = HRReal(parsed); break;
+	}
+	if (g_zoom_relative) r = r * FContext.CurrentLocation.HalfH;
+	return r;
+}
+
+static void release_locate_task() {
+	if (g_locate_ctx) {
+		g_locate_ctx->Release();
+		g_locate_ctx = nullptr;
+	}
+	g_locate_task = nullptr;
+	g_locate_cancelling = false;
+}
+
+static void poll_locate_task() {
+	if (!g_locate_ctx) return;
+	if (g_locate_ctx->Terminated()) {
+		if (g_locate_ctx->Finished()) {
+			FContext.ZoomToAnimated(g_locate_task->coordinate, g_locate_precision, g_locate_target_radius);
+			if (g_locate_new_itlim) Global::ItLim = g_locate_new_itlim;
+			g_show_feature_dialog = false;
+		}
+		release_locate_task();
+		return;
+	}
+	ProgressTrackable *pt = dynamic_cast<ProgressTrackable *>(g_locate_task);
+	double progress = 0;
+	std::string desc(g_locate_task->GetDescription());
+	if (pt) {
+		SRReal num, den;
+		if (pt->GetProgress(num, den) && den != 0.0) {
+			progress = double(num / den);
+			char tmp[64];
+			std::snprintf(tmp, sizeof(tmp), " (%.1f%%)", progress * 100.0);
+			desc += tmp;
+		}
+	}
+	std::string detail(g_locate_task->GetDetailedProgress());
+	std::snprintf(g_locate_progress_text, sizeof(g_locate_progress_text),
+		"%s\n%s", desc.c_str(), detail.c_str());
+}
+
 static int      g_iter_dialog_buf       = 0;
 static char     g_loc_real_buf[128]     = {0};
 static char     g_loc_imag_buf[128]     = {0};
@@ -439,15 +517,32 @@ static void draw_formula_dialog() {
 	ImGui::End();
 }
 
+static void open_feature_dialog() {
+	g_show_feature_dialog = true;
+	if (FContext.Feature) {
+		g_feature_radius = FContext.CurrentLocation.HalfH;
+		FContext.Feature->GetRadius(g_feature_radius);
+	}
+}
+
 static void draw_feature_dialog() {
 	if (!g_show_feature_dialog) return;
-	ImGui::SetNextWindowSize(ImVec2(460, 220), ImGuiCond_Once);
+	poll_locate_task();
+	if (!g_show_feature_dialog) return;
+	ImGui::SetNextWindowSize(ImVec2(540, 360), ImGuiCond_Once);
 	bool keep = g_show_feature_dialog;
 	if (ImGui::Begin("Feature", &keep, ImGuiWindowFlags_NoCollapse)) {
 		Evaluator::Feature *Feature = FContext.Feature;
 		if (!Feature) {
 			ImGui::Text("No feature under cursor.");
-		} else {
+			if (ImGui::Button("Close")) g_show_feature_dialog = false;
+			ImGui::End();
+			g_show_feature_dialog = keep && g_show_feature_dialog;
+			return;
+		}
+
+		// Feature name + info.
+		{
 			std::wstring_view name = Feature->Name();
 			std::wstring_view info = Feature->Information();
 			if (!name.empty()) {
@@ -464,16 +559,71 @@ static void draw_feature_dialog() {
 				size_t len = std::wcsrtombs(buf, &p, sizeof(buf) - 1, &st);
 				if (len != size_t(-1)) { buf[len] = 0; ImGui::TextWrapped("%s", buf); }
 			}
-			ImGui::Separator();
-			if (ImGui::Button("Center on feature")) {
-				RelLocation NewLoc = FContext.CurrentLocation;
-				Feature->GetCoordinate(NewLoc.X, NewLoc.Y);
-				FContext.ChangeLocation(NewLoc);
-				g_show_feature_dialog = false;
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Close")) g_show_feature_dialog = false;
 		}
+		ImGui::Separator();
+
+		const bool task_running = (g_locate_ctx != nullptr);
+
+		if (task_running) {
+			ImGui::TextWrapped("%s", g_locate_progress_text);
+			if (!g_locate_cancelling) {
+				if (ImGui::Button("Cancel")) {
+					g_locate_ctx->Cancel();
+					g_locate_cancelling = true;
+				}
+			} else {
+				ImGui::TextDisabled("Cancelling...");
+			}
+			ImGui::End();
+			g_show_feature_dialog = keep && g_show_feature_dialog;
+			return;
+		}
+
+		// Zoom target controls.
+		const bool can_locate = Feature->CanLocatePrecisely();
+		ImGui::BeginDisabled(!can_locate);
+		const char *types[] = { "Height", "Half height", "Magnification", "Depth", "Feature depth x" };
+		ImGui::Combo("Target", &g_zoom_target_idx, types, IM_ARRAYSIZE(types));
+		ImGui::Checkbox("Relative", &g_zoom_relative);
+		ImGui::InputText("Value", g_zoom_target_value, sizeof(g_zoom_target_value));
+		ImGui::EndDisabled();
+
+		ImGui::Separator();
+		if (ImGui::Button("Center on feature")) {
+			RelLocation NewLoc = FContext.CurrentLocation;
+			Feature->GetCoordinate(NewLoc.X, NewLoc.Y);
+			FContext.ChangeLocation(NewLoc);
+			g_show_feature_dialog = false;
+		}
+		ImGui::SameLine();
+		ImGui::BeginDisabled(!can_locate);
+		if (ImGui::Button("Zoom to precise location")) {
+			try {
+				g_locate_target_radius = calculate_zoom_target_radius();
+			} catch (...) {
+				std::fprintf(stderr, "Imagina: invalid zoom target value\n");
+				ImGui::EndDisabled();
+				ImGui::End();
+				g_show_feature_dialog = keep && g_show_feature_dialog;
+				return;
+			}
+			g_locate_precision = -std::min<int64_t>(0, g_locate_target_radius.Exponent) + 64;
+			Evaluator::FeatureFinder *ff = FContext.evaluator->GetFeatureFinder();
+			g_locate_new_itlim = Feature->ItLimForZoomLevel(g_locate_target_radius);
+			if (!ff) {
+				std::fprintf(stderr, "Imagina: feature finder not available for this fractal\n");
+			} else {
+				g_locate_task = ff->CreatePreciseLocatingTask(Feature, g_locate_precision, FContext.CenterCoordinate);
+				if (g_locate_task) {
+					FContext.CancelAll();
+					g_locate_ctx = Computation::AddTask(g_locate_task);
+					std::snprintf(g_locate_progress_text, sizeof(g_locate_progress_text), "Starting...");
+				}
+			}
+		}
+		ImGui::EndDisabled();
+		ImGui::SameLine();
+		if (ImGui::Button("Close")) g_show_feature_dialog = false;
 	}
 	ImGui::End();
 	g_show_feature_dialog = keep && g_show_feature_dialog;
@@ -598,7 +748,7 @@ static void mouse_button_cb(GLFWwindow *w, int button, int action, int /*mods*/)
 			if ((now - last_press_time) < 0.35 &&
 			    std::abs(MouseX - last_press_x) < 5 &&
 			    std::abs(MouseY - last_press_y) < 5) {
-				if (FContext.Feature) g_show_feature_dialog = true;
+				if (FContext.Feature) open_feature_dialog();
 				last_press_time = 0.0; // consume
 			} else {
 				last_press_time = now;
